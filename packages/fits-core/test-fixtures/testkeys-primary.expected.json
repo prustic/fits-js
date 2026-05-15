@@ -1,0 +1,103 @@
+{
+  "cards": [
+    {
+      "keyword": "SIMPLE",
+      "type": "bool",
+      "value": true
+    },
+    {
+      "keyword": "BITPIX",
+      "type": "int",
+      "value": 16
+    },
+    {
+      "keyword": "NAXIS",
+      "type": "int",
+      "value": 2
+    },
+    {
+      "keyword": "NAXIS1",
+      "type": "int",
+      "value": 300
+    },
+    {
+      "keyword": "NAXIS2",
+      "type": "int",
+      "value": 300
+    },
+    {
+      "keyword": "EXTEND",
+      "type": "bool",
+      "value": true
+    },
+    {
+      "keyword": "CRVAL1",
+      "type": "float",
+      "value": 201.36506299999994
+    },
+    {
+      "keyword": "CRVAL2",
+      "type": "float",
+      "value": -43.019113000000004
+    },
+    {
+      "keyword": "RADESYS",
+      "type": "str",
+      "value": "FK5"
+    },
+    {
+      "keyword": "EQUINOX",
+      "type": "float",
+      "value": 2000.0
+    },
+    {
+      "keyword": "CTYPE1",
+      "type": "str",
+      "value": "RA---TAN"
+    },
+    {
+      "keyword": "CTYPE2",
+      "type": "str",
+      "value": "DEC--TAN"
+    },
+    {
+      "keyword": "CRPIX1",
+      "type": "float",
+      "value": 150.5
+    },
+    {
+      "keyword": "CRPIX2",
+      "type": "float",
+      "value": 150.5
+    },
+    {
+      "keyword": "CDELT1",
+      "type": "float",
+      "value": -0.0004722222
+    },
+    {
+      "keyword": "CDELT2",
+      "type": "float",
+      "value": 0.0004722222
+    },
+    {
+      "keyword": "SVALUE",
+      "type": "str",
+      "value": "This is a long string value that extents over 3 keyword records."
+    },
+    {
+      "keyword": "DATE",
+      "type": "str",
+      "value": "2013-12-05T17:14:42"
+    }
+  ],
+  "continue": {
+    "SVALUE": "This is a long string value that extents over 3 keyword records."
+  },
+  "hierarch": {
+    "ESO TEL AIRM START": {
+      "value": 1.134,
+      "comment": "Airmass at start"
+    }
+  }
+}

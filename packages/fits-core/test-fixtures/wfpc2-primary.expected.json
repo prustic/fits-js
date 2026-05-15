@@ -1,0 +1,204 @@
+{
+  "cards": [
+    {
+      "keyword": "SIMPLE",
+      "type": "bool",
+      "value": true
+    },
+    {
+      "keyword": "BITPIX",
+      "type": "int",
+      "value": -32
+    },
+    {
+      "keyword": "NAXIS",
+      "type": "int",
+      "value": 3
+    },
+    {
+      "keyword": "NAXIS1",
+      "type": "int",
+      "value": 200
+    },
+    {
+      "keyword": "NAXIS2",
+      "type": "int",
+      "value": 200
+    },
+    {
+      "keyword": "NAXIS3",
+      "type": "int",
+      "value": 4
+    },
+    {
+      "keyword": "EXTEND",
+      "type": "bool",
+      "value": true
+    },
+    {
+      "keyword": "BSCALE",
+      "type": "float",
+      "value": 1.0
+    },
+    {
+      "keyword": "BZERO",
+      "type": "float",
+      "value": 0.0
+    },
+    {
+      "keyword": "OPSIZE",
+      "type": "int",
+      "value": 2112
+    },
+    {
+      "keyword": "ORIGIN",
+      "type": "str",
+      "value": "STScI-STSDAS"
+    },
+    {
+      "keyword": "FITSDATE",
+      "type": "str",
+      "value": "2004-01-09"
+    },
+    {
+      "keyword": "FILENAME",
+      "type": "str",
+      "value": "u5780205r_cvt.c0h"
+    },
+    {
+      "keyword": "ALLG-MAX",
+      "type": "float",
+      "value": 3777.701
+    },
+    {
+      "keyword": "ALLG-MIN",
+      "type": "float",
+      "value": -73.19537
+    },
+    {
+      "keyword": "ODATTYPE",
+      "type": "str",
+      "value": "FLOATING"
+    },
+    {
+      "keyword": "SDASMGNU",
+      "type": "int",
+      "value": 4
+    },
+    {
+      "keyword": "CRVAL1",
+      "type": "float",
+      "value": 182.6311886308
+    },
+    {
+      "keyword": "CRVAL2",
+      "type": "float",
+      "value": 39.39633673411
+    },
+    {
+      "keyword": "CRPIX1",
+      "type": "float",
+      "value": 420.0
+    },
+    {
+      "keyword": "CRPIX2",
+      "type": "float",
+      "value": 424.5
+    },
+    {
+      "keyword": "CD1_1",
+      "type": "float",
+      "value": -1.06704e-6
+    },
+    {
+      "keyword": "CD1_2",
+      "type": "float",
+      "value": -1.25958e-5
+    },
+    {
+      "keyword": "CD2_1",
+      "type": "float",
+      "value": -1.26016e-5
+    },
+    {
+      "keyword": "CD2_2",
+      "type": "float",
+      "value": 1.06655e-6
+    },
+    {
+      "keyword": "DATAMIN",
+      "type": "float",
+      "value": -73.19537
+    },
+    {
+      "keyword": "DATAMAX",
+      "type": "float",
+      "value": 3777.701
+    },
+    {
+      "keyword": "MIR_REVR",
+      "type": "bool",
+      "value": true
+    },
+    {
+      "keyword": "ORIENTAT",
+      "type": "float",
+      "value": -85.16
+    },
+    {
+      "keyword": "FILLCNT",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "keyword": "ERRCNT",
+      "type": "int",
+      "value": 0
+    },
+    {
+      "keyword": "FPKTTIME",
+      "type": "float",
+      "value": 51229.798574
+    },
+    {
+      "keyword": "LPKTTIME",
+      "type": "float",
+      "value": 51229.798742
+    },
+    {
+      "keyword": "CTYPE1",
+      "type": "str",
+      "value": "RA---TAN"
+    },
+    {
+      "keyword": "CTYPE2",
+      "type": "str",
+      "value": "DEC--TAN"
+    },
+    {
+      "keyword": "DETECTOR",
+      "type": "int",
+      "value": 1
+    },
+    {
+      "keyword": "DEZERO",
+      "type": "float",
+      "value": 316.6452
+    },
+    {
+      "keyword": "BIASEVEN",
+      "type": "float",
+      "value": 316.6715
+    },
+    {
+      "keyword": "BIASODD",
+      "type": "float",
+      "value": 316.6189
+    },
+    {
+      "keyword": "GOODMIN",
+      "type": "float",
+      "value": -5.064006
+    }
+  ]
+}

@@ -53,6 +53,9 @@ importers:
       '@fits-js/typescript-config':
         specifier: workspace:*
         version: link:../../tooling/typescript
+      '@types/node':
+        specifier: 'catalog:'
+        version: 25.8.0
       eslint:
         specifier: 'catalog:'
         version: 10.3.0
