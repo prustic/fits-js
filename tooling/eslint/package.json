@@ -1,0 +1,25 @@
+{
+  "name": "@fits-js/eslint-config",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    "./base": "./base.js"
+  },
+  "files": [
+    "base.js"
+  ],
+  "dependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "catalog:",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.5",
+    "prettier": "catalog:",
+    "typescript-eslint": "^8.59.2"
+  },
+  "peerDependencies": {
+    "eslint": "catalog:",
+    "typescript": "catalog:"
+  }
+}

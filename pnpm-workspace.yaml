@@ -1,0 +1,12 @@
+packages:
+  - "packages/*"
+  - "tooling/*"
+  - "examples/*"
+  - "tests/*"
+  - "apps/*"
+
+catalog:
+  "@types/node": ^25.6.2
+  typescript: ^5.9.3
+  prettier: ^3.8.1
+  eslint: ^10.1.0
