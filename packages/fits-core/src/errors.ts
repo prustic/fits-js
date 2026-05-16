@@ -62,3 +62,32 @@ export class FitsUnsupportedError extends FitsError {
     this.hduIndex = context?.hduIndex;
   }
 }
+
+/**
+ * A byte source could not be read: an invalid range, an HTTP error, or a
+ * filesystem failure behind a `RandomAccessReader`. The structured fields
+ * let callers distinguish a 404 from a range error without string-matching.
+ */
+export class FitsIoError extends FitsError {
+  /** Source URL or path, when applicable. */
+  readonly url?: string;
+  /** HTTP status, when the failure came from a response. */
+  readonly status?: number;
+  /** Byte offset of the failing read, when applicable. */
+  readonly offset?: number;
+
+  constructor(
+    message: string,
+    context?: {
+      url?: string;
+      status?: number;
+      offset?: number;
+      cause?: unknown;
+    },
+  ) {
+    super(message, context?.cause === undefined ? undefined : { cause: context.cause });
+    this.url = context?.url;
+    this.status = context?.status;
+    this.offset = context?.offset;
+  }
+}
