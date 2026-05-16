@@ -1,4 +1,6 @@
-export { FitsError, FitsHeaderError } from "./errors.js";
+export { FitsError, FitsHeaderError, FitsStructureError, FitsUnsupportedError } from "./errors.js";
+export { findHdu, type Hdu, type HduType } from "./hdu/hdu.js";
+export { readHdus, type ReadHdusResult } from "./hdu/read-hdus.js";
 export {
   isFitsComplex,
   type FitsComplex,

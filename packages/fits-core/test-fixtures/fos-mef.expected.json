@@ -1,0 +1,20 @@
+{
+  "hdus": [
+    {
+      "index": 0,
+      "type": "primary",
+      "name": null,
+      "version": null,
+      "dataOffset": 14400,
+      "dataByteLength": 17280
+    },
+    {
+      "index": 1,
+      "type": "table",
+      "name": "y19g0309t.c2h.tab",
+      "version": null,
+      "dataOffset": 40320,
+      "dataByteLength": 2880
+    }
+  ]
+}
