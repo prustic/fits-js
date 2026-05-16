@@ -28,6 +28,7 @@
   "devDependencies": {
     "@fits-js/eslint-config": "workspace:*",
     "@fits-js/typescript-config": "workspace:*",
+    "@types/node": "catalog:",
     "eslint": "catalog:"
   }
 }
