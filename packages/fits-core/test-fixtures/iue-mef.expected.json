@@ -1,0 +1,20 @@
+{
+  "hdus": [
+    {
+      "index": 0,
+      "type": "primary",
+      "name": null,
+      "version": null,
+      "dataOffset": 28800,
+      "dataByteLength": 0
+    },
+    {
+      "index": 1,
+      "type": "bintable",
+      "name": "MELO",
+      "version": null,
+      "dataOffset": 34560,
+      "dataByteLength": 14400
+    }
+  ]
+}

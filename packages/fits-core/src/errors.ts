@@ -33,3 +33,32 @@ export class FitsHeaderError extends FitsError {
     this.rawCard = context?.rawCard;
   }
 }
+
+/**
+ * The HDU structure is invalid or unsupported: a missing `SIMPLE`,
+ * truncated data unit, or the deprecated random-groups format.
+ */
+export class FitsStructureError extends FitsError {
+  /** Zero-based index of the offending HDU, when known. */
+  readonly hduIndex?: number;
+
+  constructor(message: string, context?: { hduIndex?: number; cause?: unknown }) {
+    super(message, context?.cause === undefined ? undefined : { cause: context.cause });
+    this.hduIndex = context?.hduIndex;
+  }
+}
+
+/**
+ * A conforming FITS construct that this library deliberately does not
+ * implement (for example the deprecated random-groups format). Distinct
+ * from {@link FitsStructureError}: the input is valid, the support is not
+ * here. Thrown unconditionally, not gated by strict mode.
+ */
+export class FitsUnsupportedError extends FitsError {
+  readonly hduIndex?: number;
+
+  constructor(message: string, context?: { hduIndex?: number; cause?: unknown }) {
+    super(message, context?.cause === undefined ? undefined : { cause: context.cause });
+    this.hduIndex = context?.hduIndex;
+  }
+}
