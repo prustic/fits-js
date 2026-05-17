@@ -1,7 +1,8 @@
 import { FitsIoError } from "../errors.js";
 import { checkRange, type RandomAccessReader } from "./reader.js";
 
-type FileHandle = Awaited<ReturnType<typeof import("node:fs/promises").open>>;
+type FsPromises = typeof import("node:fs/promises");
+type FileHandle = Awaited<ReturnType<FsPromises["open"]>>;
 
 /**
  * A {@link RandomAccessReader} over a file on the Node/Bun/Deno filesystem.
@@ -29,7 +30,8 @@ export class NodeFileReader implements RandomAccessReader {
 
   static async open(path: string | URL): Promise<NodeFileReader> {
     const where = String(path);
-    let fs: typeof import("node:fs/promises");
+    let fs: FsPromises;
+
     try {
       fs = await import("node:fs/promises");
     } catch (cause) {
@@ -38,6 +40,7 @@ export class NodeFileReader implements RandomAccessReader {
         cause,
       });
     }
+
     try {
       const handle = await fs.open(path, "r");
       const { size } = await handle.stat();
@@ -49,9 +52,13 @@ export class NodeFileReader implements RandomAccessReader {
 
   async read(offset: number, length: number): Promise<Uint8Array> {
     checkRange(offset, length);
-    if (offset >= this.size) return new Uint8Array(0);
+    if (offset >= this.size) {
+      return new Uint8Array(0);
+    }
+
     const want = Math.min(length, this.size - offset);
     const buf = new Uint8Array(want);
+
     try {
       const { bytesRead } = await this._handle.read(buf, 0, want, offset);
       return bytesRead === want ? buf : buf.subarray(0, bytesRead);

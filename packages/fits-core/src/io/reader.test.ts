@@ -22,11 +22,11 @@ test("BytesReader accepts an ArrayBuffer", async () => {
   assert.deepEqual(await r.read(10, 5), sample.subarray(10, 15));
 });
 
-test("checkRange rejects non-integer / negative ranges", async () => {
+test("checkRange throws on non-integer / negative ranges", () => {
   const r = new BytesReader(sample);
-  await assert.rejects(() => r.read(-1, 10), FitsIoError);
-  await assert.rejects(() => r.read(0, -10), FitsIoError);
-  await assert.rejects(() => r.read(1.5, 10), FitsIoError);
+  assert.throws(() => r.read(-1, 10), FitsIoError);
+  assert.throws(() => r.read(0, -10), FitsIoError);
+  assert.throws(() => r.read(1.5, 10), FitsIoError);
 });
 
 test("BlobReader reads on demand", async () => {

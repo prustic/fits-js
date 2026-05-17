@@ -48,12 +48,14 @@ export class BytesReader implements RandomAccessReader {
   }
 
   read(offset: number, length: number): Promise<Uint8Array> {
-    // Defer into a microtask so a range error rejects rather than throws.
-    return Promise.resolve().then(() => {
-      checkRange(offset, length);
-      if (offset >= this._bytes.length) return new Uint8Array(0);
-      return this._bytes.subarray(offset, Math.min(offset + length, this._bytes.length));
-    });
+    checkRange(offset, length);
+    if (offset >= this._bytes.length) {
+      return Promise.resolve(new Uint8Array(0));
+    }
+
+    return Promise.resolve(
+      this._bytes.subarray(offset, Math.min(offset + length, this._bytes.length)),
+    );
   }
 }
 
@@ -78,8 +80,12 @@ export class BlobReader implements RandomAccessReader {
 
   async read(offset: number, length: number): Promise<Uint8Array> {
     checkRange(offset, length);
-    if (offset >= this._blob.size) return new Uint8Array(0);
+    if (offset >= this._blob.size) {
+      return new Uint8Array(0);
+    }
+
     const end = Math.min(offset + length, this._blob.size);
+
     try {
       return new Uint8Array(await this._blob.slice(offset, end).arrayBuffer());
     } catch (cause) {

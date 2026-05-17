@@ -17,29 +17,6 @@ export interface HttpRangeReaderOptions {
   signal?: AbortSignal;
 }
 
-/** Parse a `Content-Range: bytes a-b/total` total, regex-free. */
-function parseContentRangeTotal(value: string | null): number | undefined {
-  if (!value) return undefined;
-  const slash = value.indexOf("/");
-  if (slash < 0) return undefined;
-  const total = value.slice(slash + 1).trim();
-  if (total === "*") return undefined;
-  const n = Number(total);
-  return Number.isInteger(n) && n >= 0 ? n : undefined;
-}
-
-function concat(chunks: Uint8Array[], total: number): Uint8Array {
-  const out = new Uint8Array(total);
-  let o = 0;
-
-  for (const c of chunks) {
-    out.set(c, o);
-    o += c.length;
-  }
-
-  return out;
-}
-
 type RunResult = { kind: "bytes"; bytes: Uint8Array } | { kind: "full" } | { kind: "eof" };
 
 /**
@@ -99,6 +76,29 @@ export class HttpRangeReader implements RandomAccessReader {
     return this._size;
   }
 
+  /** Parse a `Content-Range: bytes a-b/total` total, regex-free. */
+  private static _parseContentRangeTotal(value: string | null): number | undefined {
+    if (!value) return undefined;
+    const slash = value.indexOf("/");
+    if (slash < 0) return undefined;
+    const total = value.slice(slash + 1).trim();
+    if (total === "*") return undefined;
+    const n = Number(total);
+    return Number.isInteger(n) && n >= 0 ? n : undefined;
+  }
+
+  private static _concat(chunks: Uint8Array[], total: number): Uint8Array {
+    const out = new Uint8Array(total);
+    let o = 0;
+
+    for (const c of chunks) {
+      out.set(c, o);
+      o += c.length;
+    }
+
+    return out;
+  }
+
   private async _doFetch(range?: string): Promise<Response> {
     const headers: Record<string, string> = { ...this._headers };
     if (range) {
@@ -122,7 +122,7 @@ export class HttpRangeReader implements RandomAccessReader {
       const res = await this._doFetch("bytes=0-0");
 
       if (res.status === 206) {
-        this._size = parseContentRangeTotal(res.headers.get("content-range"));
+        this._size = HttpRangeReader._parseContentRangeTotal(res.headers.get("content-range"));
         this._etag = res.headers.get("etag") ?? res.headers.get("last-modified") ?? undefined;
         await res.arrayBuffer();
       } else if (res.ok) {
@@ -214,7 +214,7 @@ export class HttpRangeReader implements RandomAccessReader {
       return { kind: "eof" };
     }
 
-    const bytes = chunks.length === 1 ? chunks[0] : concat(chunks, total);
+    const bytes = chunks.length === 1 ? chunks[0] : HttpRangeReader._concat(chunks, total);
     this._cachePages(absStart, bytes);
 
     return { kind: "bytes", bytes };
