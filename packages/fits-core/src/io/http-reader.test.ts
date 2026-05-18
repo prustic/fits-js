@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { FitsIoError } from "../errors.js";
 import { HttpRangeReader } from "./http-reader.js";
+import { BytesReader } from "./reader.js";
 
 const data = Uint8Array.from({ length: 4096 }, (_, i) => i % 251);
 
@@ -152,6 +154,112 @@ test("HttpRangeReader: If-Range is sent once an ETag is known", async () => {
   await r.read(2000, 10);
   assert.equal(ifRange[0], undefined); // probe: no ETag yet
   assert.ok(ifRange.slice(1).every((v) => v === '"abc"'));
+});
+
+test("HttpRangeReader: a malformed Content-Range total is not trusted as size", async () => {
+  // `bytes a-b/` (empty total): Number("") is 0, which would set size=0 and
+  // silently truncate every later read to empty.
+  const fetch = ((_u: string | URL, init?: RequestInit) => {
+    const range = (init?.headers as Record<string, string>).Range;
+    const dash = range.indexOf("-");
+    const a = Number(range.slice("bytes=".length, dash));
+    const b = Number(range.slice(dash + 1));
+    const end = Math.min(b + 1, data.length);
+    return Promise.resolve(
+      new Response(data.slice(a, end), {
+        status: 206,
+        headers: { "Content-Range": `bytes ${a}-${end - 1}/` },
+      }),
+    );
+  }) as unknown as typeof globalThis.fetch;
+  const r = new HttpRangeReader("https://x/f.fits", { fetch, pageSize: 512 });
+  assert.deepEqual(await r.read(0, 100), data.subarray(0, 100));
+  assert.equal(r.size, undefined); // never adopted the bogus total
+});
+
+test("HttpRangeReader: a 200 after Range was honored throws (resource changed)", async () => {
+  // 206 probe, then a 200 on the next range = If-Range failed mid-read.
+  let n = 0;
+  const fetch = ((_u: string | URL, init?: RequestInit) => {
+    n++;
+    void (init?.headers as Record<string, string>).Range;
+    if (n === 1) {
+      return Promise.resolve(
+        new Response(data.slice(0, 1), {
+          status: 206,
+          headers: { "Content-Range": `bytes 0-0/${data.length}`, ETag: '"v1"' },
+        }),
+      );
+    }
+    return Promise.resolve(new Response(data, { status: 200 }));
+  }) as unknown as typeof globalThis.fetch;
+  const r = new HttpRangeReader("https://x/f.fits", { fetch, pageSize: 512 });
+  await assert.rejects(
+    () => r.read(0, 100),
+    (e: unknown) => e instanceof FitsIoError && e.status === 200,
+  );
+});
+
+test("HttpRangeReader: an error status mid-read carries the run offset", async () => {
+  let n = 0;
+  const fetch = ((_u: string | URL) => {
+    n++;
+    if (n === 1) {
+      return Promise.resolve(
+        new Response(data.slice(0, 1), {
+          status: 206,
+          headers: { "Content-Range": `bytes 0-0/${data.length}` },
+        }),
+      );
+    }
+    return Promise.resolve(new Response(null, { status: 503 }));
+  }) as unknown as typeof globalThis.fetch;
+  const r = new HttpRangeReader("https://x/f.fits", { fetch, pageSize: 512 });
+  await assert.rejects(
+    () => r.read(600, 10), // page 1 -> the failing run starts at byte 512
+    (e: unknown) => e instanceof FitsIoError && e.status === 503 && e.offset === 512,
+  );
+});
+
+test("HttpRangeReader: an aborted fetch surfaces unwrapped, not as FitsIoError", async () => {
+  const ac = new AbortController();
+  const fetch = (() => {
+    ac.abort();
+    const err = new Error("aborted");
+    err.name = "AbortError";
+    return Promise.reject(err);
+  }) as unknown as typeof globalThis.fetch;
+  const r = new HttpRangeReader("https://x/f.fits", { fetch, signal: ac.signal });
+  await assert.rejects(
+    () => r.read(0, 10),
+    (e: unknown) => e instanceof Error && !(e instanceof FitsIoError) && e.name === "AbortError",
+  );
+});
+
+test("HttpRangeReader: byte-for-byte vs BytesReader on a real archive file", async () => {
+  const whole = new Uint8Array(
+    readFileSync(new URL("../../test-fixtures/fos-mef.fits", import.meta.url)),
+  );
+  const cap = 1500; // short 206s, so a page run needs follow-up requests
+  const fetch = ((_u: string | URL, init?: RequestInit) => {
+    const range = (init?.headers as Record<string, string>).Range;
+    const dash = range.indexOf("-");
+    const a = Number(range.slice("bytes=".length, dash));
+    const b = Number(range.slice(dash + 1));
+    if (a >= whole.length) return Promise.resolve(new Response(null, { status: 416 }));
+    const end = Math.min(b + 1, whole.length, a + cap);
+    return Promise.resolve(
+      new Response(whole.slice(a, end), {
+        status: 206,
+        headers: { "Content-Range": `bytes ${a}-${end - 1}/${whole.length}` },
+      }),
+    );
+  }) as unknown as typeof globalThis.fetch;
+  const r = new HttpRangeReader("https://x/fos-mef.fits", { fetch, pageSize: 1024 });
+  const mem = new BytesReader(whole);
+  assert.deepEqual(await r.read(0, whole.length), await mem.read(0, whole.length));
+  assert.deepEqual(await r.read(2880, 5760), await mem.read(2880, 5760));
+  assert.deepEqual(await r.read(whole.length - 100, 500), await mem.read(whole.length - 100, 500));
 });
 
 test("HttpRangeReader: a network failure is wrapped as FitsIoError", async () => {

@@ -17,7 +17,7 @@ export interface HttpRangeReaderOptions {
   signal?: AbortSignal;
 }
 
-type RunResult = { kind: "bytes"; bytes: Uint8Array } | { kind: "full" } | { kind: "eof" };
+type RunResult = { kind: "bytes"; bytes: Uint8Array } | { kind: "eof" };
 
 /**
  * A {@link RandomAccessReader} over an HTTP(S) URL using Range requests.
@@ -26,9 +26,15 @@ type RunResult = { kind: "bytes"; bytes: Uint8Array } | { kind: "full" } | { kin
  * is correct regardless of cache eviction; the LRU page cache is purely an
  * optimization for overlapping reads. A short `206` is followed up until
  * the requested range is satisfied. End of file is concluded only from the
- * known size or a `416`, never from a cache miss. A server that ignores
- * `Range` (responds `200`) falls back to the whole body once; `If-Range`
- * guards against the resource changing mid-read.
+ * known size or a `416`, never from a cache miss. A server that never
+ * honors `Range` (a `200` to the initial probe) is read whole, once. After
+ * the probe succeeds with `206`, `If-Range` makes a mid-read change fail
+ * loudly: a later `200` throws rather than mixing two representations.
+ *
+ * @remarks
+ * The page cache is best-effort: two concurrent reads missing the same
+ * page may each fetch it. When the total size is unknown a read allocates
+ * the caller-supplied `length` up front, so callers pass bounded lengths.
  *
  * @example
  * ```ts
@@ -68,7 +74,7 @@ export class HttpRangeReader implements RandomAccessReader {
     this._pageSize = options.pageSize ?? 65536;
     this._coalesceGap = options.coalesceGap ?? 16384;
     this._maxCacheBytes = options.maxCacheBytes ?? 8 * 1024 * 1024;
-    this._headers = options.headers ?? {};
+    this._headers = { ...(options.headers ?? {}) };
     this._signal = options.signal;
   }
 
@@ -82,9 +88,17 @@ export class HttpRangeReader implements RandomAccessReader {
     const slash = value.indexOf("/");
     if (slash < 0) return undefined;
     const total = value.slice(slash + 1).trim();
-    if (total === "*") return undefined;
+    if (total === "" || total === "*") return undefined;
+
+    // Decimal-digits only (RFC 7233 1*DIGIT). Rejects "", "1e3", "0x10" and
+    // whitespace, none of which Number() refuses on its own.
+    for (let i = 0; i < total.length; i++) {
+      const c = total.charCodeAt(i);
+      if (c < 48 || c > 57) return undefined;
+    }
+
     const n = Number(total);
-    return Number.isInteger(n) && n >= 0 ? n : undefined;
+    return Number.isSafeInteger(n) ? n : undefined;
   }
 
   private static _concat(chunks: Uint8Array[], total: number): Uint8Array {
@@ -109,6 +123,10 @@ export class HttpRangeReader implements RandomAccessReader {
     try {
       return await this._fetch(this._url, { headers, signal: this._signal });
     } catch (cause) {
+      if (this._signal?.aborted && cause instanceof Error) {
+        throw cause;
+      }
+
       throw new FitsIoError(`fetch failed for ${this._urlStr}`, {
         url: this._urlStr,
         cause,
@@ -128,6 +146,11 @@ export class HttpRangeReader implements RandomAccessReader {
       } else if (res.ok) {
         this._full = new Uint8Array(await res.arrayBuffer());
         this._size = this._full.length;
+      } else if (res.status === 416) {
+        throw new FitsIoError(`empty or unsatisfiable resource ${this._urlStr}`, {
+          url: this._urlStr,
+          status: 416,
+        });
       } else {
         throw new FitsIoError(`HTTP ${res.status} fetching ${this._urlStr}`, {
           url: this._urlStr,
@@ -152,9 +175,11 @@ export class HttpRangeReader implements RandomAccessReader {
       if (o >= body.length) break;
 
       if (!this._pages.has(pg)) {
-        const slice = body.subarray(o, o + this._pageSize);
-        this._pages.set(pg, slice);
-        this._cachedBytes += slice.length;
+        // Copy, not subarray: a view pins the whole fetched run's buffer
+        // alive, so the byte budget below would not bound real memory.
+        const page = body.slice(o, o + this._pageSize);
+        this._pages.set(pg, page);
+        this._cachedBytes += page.length;
       }
     }
 
@@ -167,7 +192,8 @@ export class HttpRangeReader implements RandomAccessReader {
 
   /**
    * Fetch `[absStart, absEndExcl)`, following up on short `206` responses
-   * until the range is satisfied or the server reports `416` / `200`.
+   * until the range is satisfied or the server reports `416`. A `200` here
+   * means Range is no longer honored mid-read, so it throws.
    */
   private async _fetchRange(absStart: number, absEndExcl: number): Promise<RunResult> {
     const end = this._size === undefined ? absEndExcl : Math.min(absEndExcl, this._size);
@@ -184,11 +210,13 @@ export class HttpRangeReader implements RandomAccessReader {
         break;
       }
 
+      // 200 here = If-Range failed (the probe got a 206): resource changed.
       if (res.status === 200) {
-        this._full = new Uint8Array(await res.arrayBuffer());
-        this._size = this._full.length;
-
-        return { kind: "full" };
+        throw new FitsIoError("resource changed during read", {
+          url: this._urlStr,
+          status: 200,
+          offset: cur,
+        });
       }
 
       if (res.status !== 206) {
@@ -197,6 +225,12 @@ export class HttpRangeReader implements RandomAccessReader {
           status: res.status,
           offset: cur,
         });
+      }
+
+      if (this._size === undefined) {
+        // Probes often omit the total; adopt it once a real range carries it.
+        const total = HttpRangeReader._parseContentRangeTotal(res.headers.get("content-range"));
+        if (total !== undefined) this._size = total;
       }
 
       const body = new Uint8Array(await res.arrayBuffer());
@@ -281,10 +315,6 @@ export class HttpRangeReader implements RandomAccessReader {
 
       const runStartByte = pageIdx * this._pageSize;
       const res = await this._fetchRange(runStartByte, (runEnd + 1) * this._pageSize);
-
-      if (res.kind === "full") {
-        return this.read(offset, length);
-      }
 
       if (res.kind === "eof") {
         break;
