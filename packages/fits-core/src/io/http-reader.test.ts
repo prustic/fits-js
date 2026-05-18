@@ -225,9 +225,8 @@ test("HttpRangeReader: an aborted fetch surfaces unwrapped, not as FitsIoError",
   const ac = new AbortController();
   const fetch = (() => {
     ac.abort();
-    const err = new Error("aborted");
-    err.name = "AbortError";
-    return Promise.reject(err);
+    // A real aborted fetch rejects with a DOMException, not a plain Error.
+    return Promise.reject(new DOMException("aborted", "AbortError"));
   }) as unknown as typeof globalThis.fetch;
   const r = new HttpRangeReader("https://x/f.fits", { fetch, signal: ac.signal });
   await assert.rejects(

@@ -28,13 +28,17 @@ type RunResult = { kind: "bytes"; bytes: Uint8Array } | { kind: "eof" };
  * the requested range is satisfied. End of file is concluded only from the
  * known size or a `416`, never from a cache miss. A server that never
  * honors `Range` (a `200` to the initial probe) is read whole, once. After
- * the probe succeeds with `206`, `If-Range` makes a mid-read change fail
- * loudly: a later `200` throws rather than mixing two representations.
+ * the probe succeeds with `206`, a later full-body `200` throws rather than
+ * mixing two representations. Detecting a mid-read change needs a server
+ * validator (`ETag`/`Last-Modified`, replayed as `If-Range`); with none, a
+ * resource that changes but keeps answering `206` is not detected.
  *
  * @remarks
  * The page cache is best-effort: two concurrent reads missing the same
  * page may each fetch it. When the total size is unknown a read allocates
  * the caller-supplied `length` up front, so callers pass bounded lengths.
+ * A failed initial probe is sticky: every later read rethrows it, by
+ * design (a dead URL is not re-hammered); build a new reader to retry.
  *
  * @example
  * ```ts
@@ -229,8 +233,10 @@ export class HttpRangeReader implements RandomAccessReader {
 
       if (this._size === undefined) {
         // Probes often omit the total; adopt it once a real range carries it.
-        const total = HttpRangeReader._parseContentRangeTotal(res.headers.get("content-range"));
-        if (total !== undefined) this._size = total;
+        const reportedSize = HttpRangeReader._parseContentRangeTotal(
+          res.headers.get("content-range"),
+        );
+        if (reportedSize !== undefined) this._size = reportedSize;
       }
 
       const body = new Uint8Array(await res.arrayBuffer());
