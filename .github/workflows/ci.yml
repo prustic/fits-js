@@ -38,4 +38,12 @@ jobs:
       - run: pnpm build
       - run: pnpm lint
       - run: pnpm format
-      - run: pnpm test
+      - run: pnpm test:coverage
+
+      - uses: codecov/codecov-action@v5
+        if: always()
+        with:
+          files: packages/fits-core/coverage/lcov.info
+          flags: fits-core
+          disable_search: true
+          token: ${{ secrets.CODECOV_TOKEN }}
