@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { FitsStructureError } from "../errors.js";
+import { FitsIoError, FitsStructureError } from "../errors.js";
 import { BytesReader, type RandomAccessReader } from "../io/reader.js";
 import { readHdus } from "../hdu/read-hdus.js";
 import { readImage } from "./image.js";
@@ -327,6 +327,49 @@ test("a declared zero-length axis keeps its rank, not shape []", async () => {
   const img = await readImage(hdu, reader);
   assert.deepEqual(img.shape, [4, 0]); // not [] (that is NAXIS=0 only)
   assert.equal(img.data.length, 0);
+});
+
+test("BITPIX 64: a bigint BZERO that is not 2^63 still applies its offset", async () => {
+  // 2^53 exceeds MAX_SAFE_INTEGER so the header carries it as a bigint, and
+  // it is not 2^63 so the unsigned convention does not apply. The offset
+  // must still be added (regression: it was silently dropped as 0).
+  const { hdu, reader } = imageHdu(
+    [card("BITPIX", 64), card("NAXIS", 1), card("NAXIS1", 2), card("BZERO", 9007199254740992n)],
+    be([0n, 2n], 64),
+  );
+  const img = await readImage(hdu, reader);
+  assert.ok(img.data instanceof Float64Array);
+  assert.deepEqual([...img.data], [9007199254740992, 9007199254740994]);
+});
+
+test("BITPIX 64: a large int64 BLANK sentinel is masked to NaN", async () => {
+  // BLANK past safe-int range arrives as a bigint; it must be compared
+  // against the raw int64 before the Number() conversion (regression: it
+  // was dropped, so blank pixels scaled as real data).
+  const blank = 9223372036854775807n; // 2^63 - 1
+  const { hdu, reader } = imageHdu(
+    [
+      card("BITPIX", 64),
+      card("NAXIS", 1),
+      card("NAXIS1", 3),
+      card("BSCALE", 2),
+      card("BZERO", 10),
+      card("BLANK", blank),
+    ],
+    be([3n, blank, 5n], 64),
+  );
+  const img = await readImage(hdu, reader);
+  assert.ok(img.data instanceof Float64Array);
+  assert.deepEqual([...img.data], [16, NaN, 20]);
+});
+
+test("readImage rejects a missing hdu or reader with named errors", async () => {
+  const { hdu, reader } = imageHdu(
+    [card("BITPIX", 16), card("NAXIS", 1), card("NAXIS1", 1)],
+    be([1], 16),
+  );
+  await assert.rejects(() => readImage(null as unknown as typeof hdu, reader), FitsStructureError);
+  await assert.rejects(() => readImage(hdu, null as unknown as typeof reader), FitsIoError);
 });
 
 test("an aborted signal cancels the read", async () => {

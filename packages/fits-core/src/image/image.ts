@@ -1,4 +1,4 @@
-import { FitsStructureError } from "../errors.js";
+import { FitsIoError, FitsStructureError } from "../errors.js";
 import type { FitsHeader } from "../header/header.js";
 import type { Hdu } from "../hdu/hdu.js";
 import type { RandomAccessReader } from "../io/reader.js";
@@ -46,7 +46,8 @@ export interface ImageRegion {
  *   for `BITPIX` 16 (`BZERO=2^15`), `Uint32Array` for 32, `BigUint64Array`
  *   for 64; `BITPIX` 8 with `BZERO=-2^7` is the signed-byte form and yields
  *   `Int8Array` (`BITPIX` 8 is natively unsigned, so there is no `Uint8`
- *   conversion).
+ *   conversion). As with the no-scaling case, a declared `BLANK` is exposed
+ *   via `blank`, not masked: an integer array cannot hold `NaN`.
  * - **No scaling** (`BSCALE=1`, `BZERO=0`): the on-disk integer array is
  *   returned as-is; if `BLANK` is declared it is exposed as `blank` for the
  *   caller to mask. This is a deliberate deviation from astropy, which
@@ -102,6 +103,7 @@ interface Layout {
   bzero: number; // numeric BZERO; the uint64 case is detected from bzeroBig
   bzeroBig?: bigint; // BZERO when the header carried it as a bigint
   blank?: number;
+  blankBig?: bigint; // BLANK when BITPIX 64 and it exceeds safe-integer range
 }
 
 /** @internal Derive and validate the image layout from the header. */
@@ -135,9 +137,11 @@ function imageLayout(header: FitsHeader, hduIndex: number): Layout {
   const bzeroRaw = header.get("BZERO");
   const bzero = typeof bzeroRaw === "number" ? bzeroRaw : 0;
   const bzeroBig = typeof bzeroRaw === "bigint" ? bzeroRaw : undefined;
-  const blank = bitpix! > 0 ? header.getNumber("BLANK") : undefined;
+  const blankRaw = bitpix! > 0 ? header.get("BLANK") : undefined;
+  const blank = typeof blankRaw === "number" ? blankRaw : undefined;
+  const blankBig = typeof blankRaw === "bigint" ? blankRaw : undefined;
 
-  return { bitpix: bitpix!, axes, count, bscale, bzero, bzeroBig, blank };
+  return { bitpix: bitpix!, axes, count, bscale, bzero, bzeroBig, blank, blankBig };
 }
 
 /** @internal An empty native typed array of `len` elements for `bitpix`. */
@@ -241,22 +245,32 @@ function unsignedView(native: ImageArray, bitpix: number, layout: Layout): Image
 
 /** @internal Apply the astropy scaling policy to a freshly read array. */
 function scale(native: ImageArray, layout: Layout): ImageArray {
-  const { bitpix, bscale, bzero, blank } = layout;
+  const { bitpix, bscale, blank } = layout;
 
   const unsigned = unsignedView(native, bitpix, layout);
   if (unsigned) return unsigned;
 
-  if (bscale === 1 && bzero === 0 && layout.bzeroBig === undefined) {
+  if (bscale === 1 && layout.bzero === 0 && layout.bzeroBig === undefined) {
     return native; // nothing to apply; expose `blank` for the caller
   }
+
+  // A bigint BZERO (BITPIX 64 past safe-int) holds the real offset; apply it
+  // in float64 like astropy, never the 0 the numeric field falls back to.
+  const bzero = layout.bzeroBig !== undefined ? Number(layout.bzeroBig) : layout.bzero;
 
   // Narrowest float that preserves the data (astropy parity): 8/16-bit ints
   // and -32 fit float32; 32/64-bit ints and -64 need float64.
   const wide = bitpix === 32 || bitpix === 64 || bitpix === -64;
   const out = wide ? new Float64Array(native.length) : new Float32Array(native.length);
   for (let i = 0; i < native.length; i++) {
-    const v = typeof native[i] === "bigint" ? Number(native[i]) : (native[i] as number);
-    out[i] = blank !== undefined && v === blank ? NaN : bzero + bscale * v;
+    const raw = native[i];
+    const isBlank =
+      typeof raw === "bigint"
+        ? (layout.blankBig !== undefined && raw === layout.blankBig) ||
+          (blank !== undefined && Number.isInteger(blank) && raw === BigInt(blank))
+        : blank !== undefined && raw === blank;
+    const v = typeof raw === "bigint" ? Number(raw) : raw;
+    out[i] = isBlank ? NaN : bzero + bscale * v;
   }
 
   return out;
@@ -311,6 +325,13 @@ export async function readImage(
   reader: RandomAccessReader,
   opts: ReadImageOptions = {},
 ): Promise<FitsImage> {
+  if (hdu == null || typeof hdu !== "object") {
+    throw new FitsStructureError("readImage: an Hdu is required");
+  }
+  if (reader == null || typeof (reader as { read?: unknown }).read !== "function") {
+    throw new FitsIoError("readImage: a RandomAccessReader is required");
+  }
+
   if (hdu.type !== "primary" && hdu.type !== "image") {
     throw new FitsStructureError(`HDU ${hdu.index} is not an image (type ${hdu.type})`, {
       hduIndex: hdu.index,
