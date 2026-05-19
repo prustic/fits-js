@@ -16,6 +16,10 @@ concurrency:
 jobs:
   build-lint-test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["22", "24"]
     steps:
       - uses: actions/checkout@v6
 
@@ -23,7 +27,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: ${{ matrix.node-version }}
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
@@ -31,9 +35,9 @@ jobs:
       - uses: actions/cache@v5
         with:
           path: .turbo
-          key: ${{ runner.os }}-turbo-${{ github.sha }}
+          key: ${{ runner.os }}-node${{ matrix.node-version }}-turbo-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-turbo-
+            ${{ runner.os }}-node${{ matrix.node-version }}-turbo-
 
       - run: pnpm build
       - run: pnpm lint
@@ -41,7 +45,7 @@ jobs:
       - run: pnpm test:coverage
 
       - uses: codecov/codecov-action@v5
-        if: always()
+        if: ${{ always() && matrix.node-version == '22' }}
         with:
           files: packages/fits-core/coverage/lcov.info
           flags: fits-core
