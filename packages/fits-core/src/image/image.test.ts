@@ -1,9 +1,25 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { FitsStructureError } from "../errors.js";
-import { BytesReader } from "../io/reader.js";
+import { BytesReader, type RandomAccessReader } from "../io/reader.js";
 import { readHdus } from "../hdu/read-hdus.js";
 import { readImage } from "./image.js";
+
+/** Wraps a reader to record how much it was asked to fetch. */
+class CountingReader implements RandomAccessReader {
+  reads = 0;
+  bytes = 0;
+  constructor(private readonly inner: BytesReader) {}
+  get size(): number | undefined {
+    return this.inner.size;
+  }
+  async read(offset: number, length: number): Promise<Uint8Array> {
+    this.reads++;
+    const b = await this.inner.read(offset, length);
+    this.bytes += b.length;
+    return b;
+  }
+}
 
 // Fixed-format card; value right-justified to column 30 (test-only, not the
 // production serializer, so the parser is never tested against its own output).
@@ -173,4 +189,122 @@ test("rejects a bad BITPIX, a non-image HDU, and truncated data", async () => {
     be([1, 2, 3], 16), // far short of 100*100*2 bytes
   );
   await assert.rejects(() => readImage(trunc.hdu, trunc.reader), FitsStructureError);
+});
+
+test("region: a 2D sub-rectangle, fetching only the region's bytes", async () => {
+  // 4x3, values 0..11 row-major (NAXIS1=4 fastest).
+  const vals = Array.from({ length: 12 }, (_, i) => i);
+  const { hdu, reader } = imageHdu(
+    [card("BITPIX", 16), card("NAXIS", 2), card("NAXIS1", 4), card("NAXIS2", 3)],
+    be(vals, 16),
+  );
+  const counting = new CountingReader(reader);
+  const cut = await readImage(hdu, counting, { region: { start: [1, 1], shape: [2, 2] } });
+  assert.deepEqual(cut.shape, [2, 2]);
+  assert.deepEqual([...cut.data], [5, 6, 9, 10]);
+  // Lazy: one run per cut row, only the 4 region elements (8 bytes) read.
+  assert.equal(counting.reads, 2);
+  assert.equal(counting.bytes, 8);
+});
+
+test("region: a full-width row range collapses to one contiguous read", async () => {
+  const vals = Array.from({ length: 12 }, (_, i) => i);
+  const { hdu, reader } = imageHdu(
+    [card("BITPIX", 16), card("NAXIS", 2), card("NAXIS1", 4), card("NAXIS2", 3)],
+    be(vals, 16),
+  );
+  const counting = new CountingReader(reader);
+  const cut = await readImage(hdu, counting, { region: { start: [0, 1], shape: [4, 2] } });
+  assert.deepEqual(cut.shape, [4, 2]);
+  assert.deepEqual([...cut.data], [4, 5, 6, 7, 8, 9, 10, 11]);
+  assert.equal(counting.reads, 1);
+});
+
+test("region: a 3D cube cutout maps row-major correctly", async () => {
+  const vals = Array.from({ length: 8 }, (_, i) => i); // idx = i1 + 2*i2 + 4*i3
+  const { hdu, reader } = imageHdu(
+    [card("BITPIX", 16), card("NAXIS", 3), card("NAXIS1", 2), card("NAXIS2", 2), card("NAXIS3", 2)],
+    be(vals, 16),
+  );
+  const cut = await readImage(hdu, reader, { region: { start: [0, 1, 0], shape: [2, 1, 2] } });
+  assert.deepEqual(cut.shape, [2, 1, 2]);
+  assert.deepEqual([...cut.data], [2, 3, 6, 7]);
+});
+
+test("region honours scaling and the raw opt-out", async () => {
+  const cards = [
+    card("BITPIX", 16),
+    card("NAXIS", 1),
+    card("NAXIS1", 5),
+    card("BSCALE", 2),
+    card("BZERO", 10),
+  ];
+  const data = be([0, 1, 2, 3, 4], 16);
+  const scaled = imageHdu(cards, data);
+  const s = await readImage(scaled.hdu, scaled.reader, { region: { start: [1], shape: [3] } });
+  assert.ok(s.data instanceof Float64Array);
+  assert.deepEqual([...s.data], [12, 14, 16]);
+
+  const raw = imageHdu(cards, data);
+  const r = await readImage(raw.hdu, raw.reader, {
+    region: { start: [1], shape: [3] },
+    raw: true,
+  });
+  assert.ok(r.data instanceof Int16Array);
+  assert.deepEqual([...r.data], [1, 2, 3]);
+});
+
+test("region: rank, bounds, and zero-extent are rejected", async () => {
+  const mk = () =>
+    imageHdu(
+      [card("BITPIX", 16), card("NAXIS", 2), card("NAXIS1", 4), card("NAXIS2", 3)],
+      be(
+        Array.from({ length: 12 }, (_, i) => i),
+        16,
+      ),
+    );
+  const a = mk();
+  await assert.rejects(
+    () => readImage(a.hdu, a.reader, { region: { start: [0], shape: [4] } }),
+    FitsStructureError,
+  );
+  const b = mk();
+  await assert.rejects(
+    () => readImage(b.hdu, b.reader, { region: { start: [2, 0], shape: [3, 1] } }),
+    FitsStructureError,
+  );
+  const c = mk();
+  await assert.rejects(
+    () => readImage(c.hdu, c.reader, { region: { start: [0, 0], shape: [4, 0] } }),
+    FitsStructureError,
+  );
+  const z = imageHdu([card("BITPIX", 8), card("NAXIS", 0)], new Uint8Array(0));
+  await assert.rejects(
+    () => readImage(z.hdu, z.reader, { region: { start: [], shape: [] } }),
+    FitsStructureError,
+  );
+});
+
+test("readImage works from an Hdu parsed over a header-only prefix (HTTP-lazy)", async () => {
+  // The Hdu carries dataSizeKnown=false (readHdus saw only the header), yet a
+  // reader with the full bytes must still decode and cut.
+  const vals = Array.from({ length: 6 }, (_, i) => i);
+  const buf = fits(
+    [
+      "SIMPLE  =                    T",
+      card("BITPIX", 16),
+      card("NAXIS", 2),
+      card("NAXIS1", 3),
+      card("NAXIS2", 2),
+    ],
+    be(vals, 16),
+  );
+  const { hdus } = readHdus(buf.subarray(0, 2880)); // header block only
+  assert.equal(hdus[0].dataSizeKnown, false);
+
+  const reader = new BytesReader(buf);
+  const whole = await readImage(hdus[0], reader);
+  assert.deepEqual([...whole.data], vals);
+  const cut = await readImage(hdus[0], reader, { region: { start: [1, 0], shape: [2, 2] } });
+  assert.deepEqual([...cut.data], [1, 2, 4, 5]);
 });

@@ -14,6 +14,7 @@ export {
   readImage,
   type FitsImage,
   type ImageArray,
+  type ImageRegion,
   type ReadImageOptions,
 } from "./image/image.js";
 export {

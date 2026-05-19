@@ -17,12 +17,23 @@ export type ImageArray =
   | BigUint64Array;
 
 /**
+ * A rectangular sub-region to read, in FITS axis order (`NAXIS1` first).
+ * `start` is the zero-based origin and `shape` the extent on each axis;
+ * both must have one entry per axis. Only the bytes the region spans are
+ * fetched, so a small cutout of a multi-gigabyte cube stays cheap.
+ */
+export interface ImageRegion {
+  readonly start: readonly number[];
+  readonly shape: readonly number[];
+}
+
+/**
  * A decoded image array plus the metadata needed to interpret it.
  *
  * `shape` is in FITS axis order (`NAXIS1` first, and `NAXIS1` is the
- * fastest-varying axis on disk). `data` is row-major in that order, so the
- * element at FITS index `(i1, i2, …)` is at
- * `i1 + NAXIS1 * (i2 + NAXIS2 * (…))`.
+ * fastest-varying axis on disk), and is the region's shape when a cutout
+ * was requested. `data` is row-major in that order, so the element at FITS
+ * index `(i1, i2, …)` is at `i1 + s1 * (i2 + s2 * (…))`.
  *
  * Unless `{ raw: true }` was passed, `BZERO`/`BSCALE` have been applied
  * following astropy: a scaled array is `Float64Array` with `BLANK` pixels
@@ -45,6 +56,8 @@ export interface FitsImage {
 
 /** Options for {@link readImage}. */
 export interface ReadImageOptions {
+  /** A rectangular cutout; the whole image is read when omitted. */
+  region?: ImageRegion;
   /**
    * Return the on-disk array without applying `BZERO`/`BSCALE` or the
    * unsigned-integer convention. The native typed array for `BITPIX` is
@@ -59,7 +72,6 @@ interface Layout {
   bitpix: number;
   axes: number[]; // FITS order, NAXIS1 first
   count: number; // product of axes (0 when NAXIS=0)
-  bytes: number; // count * bytesPerElement
   bscale: number;
   bzero: number; // numeric BZERO; the uint64 case is detected from bzeroBig
   bzeroBig?: bigint; // BZERO when the header carried it as a bigint
@@ -99,49 +111,67 @@ function imageLayout(header: FitsHeader, hduIndex: number): Layout {
   const bzeroBig = typeof bzeroRaw === "bigint" ? bzeroRaw : undefined;
   const blank = bitpix! > 0 ? header.getNumber("BLANK") : undefined;
 
-  return {
-    bitpix: bitpix!,
-    axes,
-    count,
-    bytes: count * (Math.abs(bitpix!) / 8),
-    bscale,
-    bzero,
-    bzeroBig,
-    blank,
-  };
+  return { bitpix: bitpix!, axes, count, bscale, bzero, bzeroBig, blank };
 }
 
-/** @internal Read `count` big-endian elements of `bitpix` from `raw`. */
-function readNative(raw: Uint8Array, bitpix: number, count: number): ImageArray {
-  const view = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
-
+/** @internal An empty native typed array of `len` elements for `bitpix`. */
+function makeNative(bitpix: number, len: number): ImageArray {
   switch (bitpix) {
     case 8:
-      return raw.slice(0, count); // copy: never alias the reader's buffer
+      return new Uint8Array(len);
+    case 16:
+      return new Int16Array(len);
+    case 32:
+      return new Int32Array(len);
+    case 64:
+      return new BigInt64Array(len);
+    case -32:
+      return new Float32Array(len);
+    default:
+      return new Float64Array(len);
+  }
+}
+
+/** @internal Decode `count` big-endian elements of `runBytes` into `out` at `outOff`. */
+function decodeInto(
+  runBytes: Uint8Array,
+  count: number,
+  bitpix: number,
+  out: ImageArray,
+  outOff: number,
+): void {
+  if (bitpix === 8) {
+    // Copy into the freshly allocated output; never alias the reader buffer.
+    (out as Uint8Array).set(runBytes.subarray(0, count), outOff);
+    return;
+  }
+
+  const view = new DataView(runBytes.buffer, runBytes.byteOffset, runBytes.byteLength);
+  switch (bitpix) {
     case 16: {
-      const out = new Int16Array(count);
-      for (let i = 0; i < count; i++) out[i] = view.getInt16(i * 2, false);
-      return out;
+      const o = out as Int16Array;
+      for (let i = 0; i < count; i++) o[outOff + i] = view.getInt16(i * 2, false);
+      break;
     }
     case 32: {
-      const out = new Int32Array(count);
-      for (let i = 0; i < count; i++) out[i] = view.getInt32(i * 4, false);
-      return out;
+      const o = out as Int32Array;
+      for (let i = 0; i < count; i++) o[outOff + i] = view.getInt32(i * 4, false);
+      break;
     }
     case 64: {
-      const out = new BigInt64Array(count);
-      for (let i = 0; i < count; i++) out[i] = view.getBigInt64(i * 8, false);
-      return out;
+      const o = out as BigInt64Array;
+      for (let i = 0; i < count; i++) o[outOff + i] = view.getBigInt64(i * 8, false);
+      break;
     }
     case -32: {
-      const out = new Float32Array(count);
-      for (let i = 0; i < count; i++) out[i] = view.getFloat32(i * 4, false);
-      return out;
+      const o = out as Float32Array;
+      for (let i = 0; i < count; i++) o[outOff + i] = view.getFloat32(i * 4, false);
+      break;
     }
     default: {
-      const out = new Float64Array(count);
-      for (let i = 0; i < count; i++) out[i] = view.getFloat64(i * 8, false);
-      return out;
+      const o = out as Float64Array;
+      for (let i = 0; i < count; i++) o[outOff + i] = view.getFloat64(i * 8, false);
+      break;
     }
   }
 }
@@ -201,23 +231,48 @@ function scale(native: ImageArray, layout: Layout): ImageArray {
   return out;
 }
 
+/** @internal Validate a region against the axes, or throw. */
+function checkRegion(region: ImageRegion, axes: number[], hduIndex: number): void {
+  const fail = (msg: string): never => {
+    throw new FitsStructureError(`HDU ${hduIndex}: region ${msg}`, { hduIndex });
+  };
+
+  if (axes.length === 0) fail("given for a header-only HDU");
+  if (region.start.length !== axes.length || region.shape.length !== axes.length) {
+    fail(`rank ${region.start.length}/${region.shape.length} does not match NAXIS ${axes.length}`);
+  }
+
+  for (let k = 0; k < axes.length; k++) {
+    const s = region.start[k];
+    const n = region.shape[k];
+    if (!Number.isInteger(s) || s < 0 || !Number.isInteger(n) || n < 1 || s + n > axes[k]) {
+      fail(`[${s}, ${s + n}) on axis ${k + 1} is out of 0..${axes[k]}`);
+    }
+  }
+}
+
 /**
- * Read and decode the image in an `IMAGE` extension or the primary HDU.
+ * Read and decode the image in an `IMAGE` extension or the primary HDU,
+ * optionally just a rectangular cutout.
  *
- * The pixels are fetched through `reader` (so a multi-gigabyte file is not
- * materialized just to open it) and decoded from FITS big-endian into the
- * typed array for `BITPIX`. `BZERO`/`BSCALE` are applied by default; pass
- * `{ raw: true }` for the unscaled on-disk array. See {@link FitsImage} for
- * the scaling rules and array layout.
+ * Pixels are fetched through `reader`, so a multi-gigabyte file is never
+ * materialized just to open it, and a `region` reads only the bytes that
+ * region spans (one contiguous run per fastest-axis line; a backing
+ * `HttpRangeReader` coalesces adjacent runs). Bytes are decoded from FITS
+ * big-endian into the typed array for `BITPIX`; `BZERO`/`BSCALE` are
+ * applied by default. See {@link FitsImage} for scaling and layout.
  *
  * @throws {@link FitsStructureError} if the HDU is not an image, the
- * structural keywords are invalid, or the data unit is truncated.
+ * structural keywords or `region` are invalid, or the data unit is
+ * truncated (fewer bytes available than the header declares).
  *
  * @example
  * ```ts
  * const { hdus } = readHdus(await reader.read(0, 2880 * 4));
- * const img = await readImage(hdus[0], reader);
- * console.log(img.shape, img.data.length);
+ * const full = await readImage(hdus[0], reader);
+ * const tile = await readImage(hdus[0], reader, {
+ *   region: { start: [1024, 1024], shape: [256, 256] },
+ * });
  * ```
  */
 export async function readImage(
@@ -239,26 +294,59 @@ export async function readImage(
     blank: layout.blank,
   };
 
+  if (opts.region) checkRegion(opts.region, layout.axes, hdu.index);
+
   if (layout.count === 0) {
-    return { shape: [], data: readNative(new Uint8Array(0), layout.bitpix, 0), ...meta };
+    return { shape: [], data: makeNative(layout.bitpix, 0), ...meta };
   }
 
-  if (!hdu.dataSizeKnown || hdu.dataByteLength < layout.bytes) {
-    throw new FitsStructureError(`HDU ${hdu.index} image data is truncated`, {
-      hduIndex: hdu.index,
-    });
+  const { axes } = layout;
+  const start = opts.region ? opts.region.start : axes.map(() => 0);
+  const shape = opts.region ? opts.region.shape.slice() : axes.slice();
+  const bpe = Math.abs(layout.bitpix) / 8;
+
+  // Source element strides, NAXIS1 fastest: stride[k] = product(axes[0..k-1]).
+  const stride: number[] = [1];
+  for (let k = 1; k < axes.length; k++) stride[k] = stride[k - 1] * axes[k - 1];
+
+  // One contiguous on-disk run spans the inner axes that are fully covered:
+  // axes 0..m-1 form a single run; only the outer axes m..n-1 are iterated.
+  let m = 1;
+  while (m < axes.length && start[m - 1] === 0 && shape[m - 1] === axes[m - 1]) m++;
+
+  let runElems = 1;
+  for (let k = 0; k < m; k++) runElems *= shape[k];
+  let outerCount = 1;
+  for (let k = m; k < axes.length; k++) outerCount *= shape[k];
+
+  // Element offset of the run's origin from the inner (0..m-1) coordinates.
+  let innerBase = 0;
+  for (let k = 0; k < m; k++) innerBase += start[k] * stride[k];
+
+  const native = makeNative(layout.bitpix, runElems * outerCount);
+
+  for (let t = 0; t < outerCount; t++) {
+    let src = innerBase;
+    let rem = t;
+    for (let k = m; k < axes.length; k++) {
+      const l = rem % shape[k];
+      rem = Math.floor(rem / shape[k]);
+      src += (start[k] + l) * stride[k];
+    }
+
+    const want = runElems * bpe;
+    const bytes = await reader.read(hdu.dataOffset + src * bpe, want);
+    if (bytes.length < want) {
+      throw new FitsStructureError(`HDU ${hdu.index} image data is truncated`, {
+        hduIndex: hdu.index,
+      });
+    }
+
+    decodeInto(bytes, runElems, layout.bitpix, native, t * runElems);
   }
 
-  const raw = await reader.read(hdu.dataOffset, layout.bytes);
-  if (raw.length < layout.bytes) {
-    throw new FitsStructureError(`HDU ${hdu.index} image data is truncated`, {
-      hduIndex: hdu.index,
-    });
-  }
-
-  const native = readNative(raw, layout.bitpix, layout.count);
   return {
-    shape: layout.axes.slice(),
+    shape,
     data: opts.raw === true ? native : scale(native, layout),
     ...meta,
   };
