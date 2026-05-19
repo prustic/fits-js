@@ -96,3 +96,65 @@ test("openFits over a real NodeFileReader matches readHdus", async () => {
     await reader.close();
   }
 });
+
+// Synthetic-corner coverage of the reader-backed walk itself, not just the
+// shared body: hand-built blocks, asserted equal to readHdus on the same
+// bytes (the metamorphic oracle), per differential-testing.md.
+const enc = new TextEncoder();
+function blocks(cards: string[], trailing?: Uint8Array): Uint8Array {
+  const s = cards.map((c) => c.padEnd(80).slice(0, 80)).join("");
+  const head = enc.encode(s.padEnd(Math.ceil(s.length / 2880) * 2880, " "));
+  if (!trailing) return head;
+  const out = new Uint8Array(head.length + trailing.length);
+  out.set(head, 0);
+  out.set(trailing, head.length);
+  return out;
+}
+const PRIMARY = [
+  "SIMPLE  =                    T",
+  "BITPIX  =                    8",
+  "NAXIS   =                    0",
+];
+
+for (const end of ["END", "end", "  END"]) {
+  test(`openFits matches readHdus with a "${end}" END card (parseHeader owns END)`, async () => {
+    const buf = blocks([...PRIMARY, end]);
+    const a = await openFits(new BytesReader(buf));
+    assert.deepEqual(shape(a.hdus), shape(readHdus(buf).hdus));
+    assert.equal(a.hdus.length, 1);
+    assert.equal(a.hdus[0].dataSizeKnown, true);
+  });
+}
+
+test("openFits handles a multi-block header (the grow loop)", async () => {
+  const comments = Array.from({ length: 50 }, (_, i) => `COMMENT card ${i}`);
+  const buf = blocks([...PRIMARY, ...comments, "END"]);
+  const a = await openFits(new BytesReader(buf));
+  assert.deepEqual(shape(a.hdus), shape(readHdus(buf).hdus));
+  assert.equal(a.hdus[0].dataOffset, 5760); // header spans two 2880 blocks
+});
+
+test("openFits stops at an interior all-zero fill block, like readHdus", async () => {
+  const buf = blocks([...PRIMARY, "END"], new Uint8Array(2880));
+  const a = await openFits(new BytesReader(buf));
+  assert.deepEqual(shape(a.hdus), shape(readHdus(buf).hdus));
+  assert.equal(a.hdus.length, 1);
+});
+
+test("a truncated trailing header fails safe (sized and unsized reader)", async () => {
+  // Valid primary, then a second header block with no END and no sizing
+  // keywords: unusable. The contract is fail-safe, not byte-identical.
+  const buf = blocks([...PRIMARY, "END"], blocks(["XTENSION= 'IMAGE   '"]));
+  const last = (hs: readonly Hdu[]) => hs[hs.length - 1];
+
+  const sized = await openFits(new BytesReader(buf));
+  assert.equal(last(sized.hdus).dataSizeKnown, false);
+  assert.deepEqual(shape(sized.hdus), shape(readHdus(buf).hdus));
+
+  const unsized: RandomAccessReader = {
+    size: undefined,
+    read: (o, l) => Promise.resolve(buf.subarray(o, Math.min(o + l, buf.length))),
+  };
+  const u = await openFits(unsized);
+  assert.equal(last(u.hdus).dataSizeKnown, false);
+});
