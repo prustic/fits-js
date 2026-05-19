@@ -35,21 +35,40 @@ export interface ImageRegion {
  * was requested. `data` is row-major in that order, so the element at FITS
  * index `(i1, i2, …)` is at `i1 + s1 * (i2 + s2 * (…))`.
  *
- * Unless `{ raw: true }` was passed, `BZERO`/`BSCALE` have been applied
- * following astropy: a scaled array is the narrowest float that preserves
- * the data (`Float32Array` for `BITPIX` 8/16/-32, `Float64Array` for
- * 32/64/-64) with `BLANK` pixels set to `NaN`; the unsigned-integer
- * convention (`BSCALE=1`, `BZERO=2^(n-1)`) yields the matching unsigned
- * typed array instead. With no scaling the on-disk integer array is returned as-is and
- * `blank` (if present) lets the caller mask undefined pixels.
+ * Unless `{ raw: true }` was passed, `BZERO`/`BSCALE` are resolved as
+ * follows:
+ *
+ * - **Scaled** (`BSCALE`/`BZERO` other than 1/0): the narrowest float that
+ *   preserves the data, `Float32Array` for `BITPIX` 8/16/-32 and
+ *   `Float64Array` for 32/64/-64, with `BLANK` pixels set to `NaN`.
+ * - **Unsigned-integer convention** (`BSCALE=1` and `BZERO` at the half
+ *   range): the matching integer array with no float widening, `Uint16Array`
+ *   for `BITPIX` 16 (`BZERO=2^15`), `Uint32Array` for 32, `BigUint64Array`
+ *   for 64; `BITPIX` 8 with `BZERO=-2^7` is the signed-byte form and yields
+ *   `Int8Array` (`BITPIX` 8 is natively unsigned, so there is no `Uint8`
+ *   conversion).
+ * - **No scaling** (`BSCALE=1`, `BZERO=0`): the on-disk integer array is
+ *   returned as-is; if `BLANK` is declared it is exposed as `blank` for the
+ *   caller to mask. This is a deliberate deviation from astropy, which
+ *   widens such an image to `float32` with `NaN` at the blanks. fits-js
+ *   keeps the integers exact and does not force a float copy.
  */
 export interface FitsImage {
-  /** Axis lengths in FITS order; `[]` for a header-only (`NAXIS=0`) HDU. */
+  /**
+   * Axis lengths in FITS order. `[]` only for a header-only `NAXIS=0` HDU;
+   * a declared zero-length axis keeps its rank (e.g. `[4, 0]`), matching
+   * astropy, with `data` empty either way.
+   */
   readonly shape: readonly number[];
   readonly data: ImageArray;
   /** `BITPIX` as written in the header (8, 16, 32, 64, -32, -64). */
   readonly bitpix: number;
   readonly bscale: number;
+  /**
+   * `BZERO`. A bigint `BZERO` is reported as the nearest `number`; the
+   * canonical `2^63` uint64 offset is exact, an arbitrary large bigint
+   * `BZERO` may not be. Use `{ raw: true }` and the header for exactness.
+   */
   readonly bzero: number;
   /** `BLANK` (integer images only), when the header declares it. */
   readonly blank?: number;
@@ -65,6 +84,12 @@ export interface ReadImageOptions {
    * returned (`Int16Array` for 16, `Float32Array` for -32, …).
    */
   raw?: boolean;
+  /**
+   * Cancels the read. A region over a large cube issues one sequential
+   * read per outer slab; the signal is checked before each, so an abort
+   * takes effect promptly and rejects with the signal's reason.
+   */
+  signal?: AbortSignal;
 }
 
 const VALID_BITPIX = new Set([8, 16, 32, 64, -32, -64]);
@@ -178,8 +203,10 @@ function decodeInto(
 }
 
 /**
- * @internal The unsigned-integer convention (`BSCALE=1`, `BZERO=2^(n-1)`):
- * returns the matching unsigned array, or `undefined` if it does not apply.
+ * @internal The unsigned-integer convention (`BSCALE=1`, `BZERO` at the
+ * half range): 16/32/64 yield `Uint16`/`Uint32`/`BigUint64`; `BITPIX` 8
+ * with `BZERO=-2^7` is the signed-byte form and yields `Int8Array`. Returns
+ * `undefined` if it does not apply.
  */
 function unsignedView(native: ImageArray, bitpix: number, layout: Layout): ImageArray | undefined {
   if (layout.bscale !== 1) return undefined;
@@ -301,7 +328,7 @@ export async function readImage(
   if (opts.region) checkRegion(opts.region, layout.axes, hdu.index);
 
   if (layout.count === 0) {
-    return { shape: [], data: makeNative(layout.bitpix, 0), ...meta };
+    return { shape: layout.axes.slice(), data: makeNative(layout.bitpix, 0), ...meta };
   }
 
   const { axes } = layout;
@@ -330,6 +357,8 @@ export async function readImage(
   const native = makeNative(layout.bitpix, runElems * outerCount);
 
   for (let t = 0; t < outerCount; t++) {
+    opts.signal?.throwIfAborted();
+
     let src = innerBase;
     let rem = t;
     for (let k = m; k < axes.length; k++) {

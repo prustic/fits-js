@@ -318,3 +318,27 @@ test("readImage works from an Hdu parsed over a header-only prefix (HTTP-lazy)",
   const cut = await readImage(hdus[0], reader, { region: { start: [1, 0], shape: [2, 2] } });
   assert.deepEqual([...cut.data], [1, 2, 4, 5]);
 });
+
+test("a declared zero-length axis keeps its rank, not shape []", async () => {
+  const { hdu, reader } = imageHdu(
+    [card("BITPIX", 16), card("NAXIS", 2), card("NAXIS1", 4), card("NAXIS2", 0)],
+    new Uint8Array(0),
+  );
+  const img = await readImage(hdu, reader);
+  assert.deepEqual(img.shape, [4, 0]); // not [] (that is NAXIS=0 only)
+  assert.equal(img.data.length, 0);
+});
+
+test("an aborted signal cancels the read", async () => {
+  const { hdu, reader } = imageHdu(
+    [card("BITPIX", 16), card("NAXIS", 1), card("NAXIS1", 4)],
+    be([1, 2, 3, 4], 16),
+  );
+  const ac = new AbortController();
+  ac.abort();
+  await assert.rejects(
+    () => readImage(hdu, reader, { signal: ac.signal }),
+    (e: unknown) =>
+      e instanceof Error && !(e instanceof FitsStructureError) && e.name === "AbortError",
+  );
+});
