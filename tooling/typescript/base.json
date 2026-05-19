@@ -1,29 +1,11 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
   "compilerOptions": {
-    /* ──────────────────────────────────────────────────────────────────────────
-     * fits-js: Shared TypeScript Configuration
-     *
-     * Every package in this monorepo extends this base config.
-     *
-     * Target: ES2023. Node 22's V8 natively supports every ES2023 feature.
-     * Downleveling would be wasteful: tsc would rewrite class fields, lose
-     * Error.cause, polyfill Array.at(), and forbid top-level await, all
-     * features the supported runtimes run natively.
-     *
-     * Module: NodeNext, the "living" module resolution that tracks Node's
-     * latest ESM behavior.  Requires explicit .js extensions in imports
-     * because Node's ESM loader does not auto-resolve extensions.
-     *
-     * strict: true is non-negotiable.  FITS data arrives as raw bytes; the
-     * type boundary between the wire format and the parsed model must be
-     * airtight, and the core must stay free of runtime dependencies.
-     * ──────────────────────────────────────────────────────────────────────── */
-
     "target": "ES2023",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "lib": ["ES2023"],
+    "types": ["node"],
 
     "strict": true,
     "esModuleInterop": true,
