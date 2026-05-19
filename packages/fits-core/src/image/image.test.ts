@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { FitsIoError, FitsStructureError } from "../errors.js";
 import { BytesReader, type RandomAccessReader } from "../io/reader.js";
 import { readHdus } from "../hdu/read-hdus.js";
+import { parseHeader } from "../header/parse-header.js";
+import type { Hdu } from "../hdu/hdu.js";
 import { readImage } from "./image.js";
 
 /** Wraps a reader to record how much it was asked to fetch. */
@@ -129,7 +131,7 @@ test("BZERO/BSCALE scaling: dtype follows the astropy matrix; BLANK -> NaN", asy
   assert.deepEqual([...b32.data], [7, 201]);
 });
 
-test("unsigned-integer convention: 16/8/64", async () => {
+test("unsigned-integer convention: 16/8/32/64", async () => {
   const u16 = imageHdu(
     [card("BITPIX", 16), card("NAXIS", 1), card("NAXIS1", 2), card("BZERO", 32768)],
     be([-32768, 32767], 16),
@@ -146,6 +148,14 @@ test("unsigned-integer convention: 16/8/64", async () => {
   assert.ok(i8Img.data instanceof Int8Array);
   assert.deepEqual([...i8Img.data], [-128, 127]);
 
+  const u32 = imageHdu(
+    [card("BITPIX", 32), card("NAXIS", 1), card("NAXIS1", 2), card("BZERO", 2147483648)],
+    be([-2147483648, 2147483647], 32),
+  );
+  const u32Img = await readImage(u32.hdu, u32.reader);
+  assert.ok(u32Img.data instanceof Uint32Array);
+  assert.deepEqual([...u32Img.data], [0, 4294967295]);
+
   const u64 = imageHdu(
     [card("BITPIX", 64), card("NAXIS", 1), card("NAXIS1", 2), card("BZERO", 1n << 63n)],
     be([-(1n << 63n), (1n << 63n) - 1n], 64),
@@ -153,6 +163,56 @@ test("unsigned-integer convention: 16/8/64", async () => {
   const u64Img = await readImage(u64.hdu, u64.reader);
   assert.ok(u64Img.data instanceof BigUint64Array);
   assert.deepEqual([...u64Img.data], [0n, (1n << 64n) - 1n]);
+});
+
+test("uint64 convention also triggers on a float-formatted BZERO=2^63", async () => {
+  // 9223372036854775808.0 has a `.` so the card parses as a number, not a
+  // bigint; 2^63 is exact in f64 and astropy returns uint64 here too.
+  const floatCard = `BZERO   = ${"9223372036854775808.0".padStart(20)}`;
+  const { hdu, reader } = imageHdu(
+    [card("BITPIX", 64), card("NAXIS", 1), card("NAXIS1", 2), floatCard],
+    be([-(1n << 63n), (1n << 63n) - 1n], 64),
+  );
+  const img = await readImage(hdu, reader);
+  assert.ok(img.data instanceof BigUint64Array);
+  assert.deepEqual([...img.data], [0n, (1n << 64n) - 1n]);
+});
+
+test("BITPIX -64 decodes big-endian Float64Array", async () => {
+  const { hdu, reader } = imageHdu(
+    [card("BITPIX", -64), card("NAXIS", 1), card("NAXIS1", 3)],
+    be([1.5, -2.25, 1e-300], -64),
+  );
+  const img = await readImage(hdu, reader);
+  assert.ok(img.data instanceof Float64Array);
+  assert.deepEqual([...img.data], [1.5, -2.25, 1e-300]);
+});
+
+test("readImage validates its own header (out-of-domain NAXIS / NAXISn)", async () => {
+  // readHdus shadows these with the same checks, so build the Hdu directly
+  // from a hand-parsed header: readImage must not trust the caller's Hdu.
+  const hduWith = (cards: string[]): Hdu => {
+    const buf = fits(["SIMPLE  =                    T", ...cards], new Uint8Array(0));
+    const { header } = parseHeader(buf);
+    return {
+      index: 0,
+      type: "primary",
+      header,
+      dataOffset: buf.length,
+      dataByteLength: 0,
+      dataSizeKnown: true,
+    };
+  };
+  const reader = new BytesReader(new Uint8Array(0));
+
+  await assert.rejects(
+    () => readImage(hduWith([card("BITPIX", 16), card("NAXIS", 1000), card("NAXIS1", 1)]), reader),
+    FitsStructureError,
+  );
+  await assert.rejects(
+    () => readImage(hduWith([card("BITPIX", 16), card("NAXIS", 1), card("NAXIS1", -3)]), reader),
+    FitsStructureError,
+  );
 });
 
 test("{ raw: true } skips scaling and returns the native array", async () => {

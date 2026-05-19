@@ -233,7 +233,9 @@ function unsignedView(native: ImageArray, bitpix: number, layout: Layout): Image
     for (let i = 0; i < s.length; i++) out[i] = s[i] + 2 ** 31;
     return out;
   }
-  if (bitpix === 64 && layout.bzeroBig === 1n << 63n) {
+  // A float-formatted BZERO=2^63 parses as a number, not a bigint; 2^63 is
+  // exact in f64 so the numeric compare is safe (astropy detects it the same).
+  if (bitpix === 64 && (layout.bzeroBig === 1n << 63n || layout.bzero === 2 ** 63)) {
     const s = native as BigInt64Array;
     const out = new BigUint64Array(s.length);
     for (let i = 0; i < s.length; i++) out[i] = BigInt.asUintN(64, s[i] + (1n << 63n));
