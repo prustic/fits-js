@@ -36,10 +36,11 @@ export interface ImageRegion {
  * index `(i1, i2, …)` is at `i1 + s1 * (i2 + s2 * (…))`.
  *
  * Unless `{ raw: true }` was passed, `BZERO`/`BSCALE` have been applied
- * following astropy: a scaled array is `Float64Array` with `BLANK` pixels
- * set to `NaN`; the unsigned-integer convention
- * (`BSCALE=1`, `BZERO=2^(n-1)`) yields the matching unsigned typed array
- * instead. With no scaling the on-disk integer array is returned as-is and
+ * following astropy: a scaled array is the narrowest float that preserves
+ * the data (`Float32Array` for `BITPIX` 8/16/-32, `Float64Array` for
+ * 32/64/-64) with `BLANK` pixels set to `NaN`; the unsigned-integer
+ * convention (`BSCALE=1`, `BZERO=2^(n-1)`) yields the matching unsigned
+ * typed array instead. With no scaling the on-disk integer array is returned as-is and
  * `blank` (if present) lets the caller mask undefined pixels.
  */
 export interface FitsImage {
@@ -222,7 +223,10 @@ function scale(native: ImageArray, layout: Layout): ImageArray {
     return native; // nothing to apply; expose `blank` for the caller
   }
 
-  const out = new Float64Array(native.length);
+  // Narrowest float that preserves the data (astropy parity): 8/16-bit ints
+  // and -32 fit float32; 32/64-bit ints and -64 need float64.
+  const wide = bitpix === 32 || bitpix === 64 || bitpix === -64;
+  const out = wide ? new Float64Array(native.length) : new Float32Array(native.length);
   for (let i = 0; i < native.length; i++) {
     const v = typeof native[i] === "bigint" ? Number(native[i]) : (native[i] as number);
     out[i] = blank !== undefined && v === blank ? NaN : bzero + bscale * v;

@@ -101,8 +101,9 @@ test("BITPIX -32 and 64 decode to Float32Array / BigInt64Array", async () => {
   assert.deepEqual([...iImg.data], [5n, 9007199254740993n]);
 });
 
-test("BZERO/BSCALE scale to Float64; BLANK becomes NaN", async () => {
-  const { hdu, reader } = imageHdu(
+test("BZERO/BSCALE scaling: dtype follows the astropy matrix; BLANK -> NaN", async () => {
+  // BITPIX 16 scaled -> Float32Array (narrowest float that holds the data).
+  const a = imageHdu(
     [
       card("BITPIX", 16),
       card("NAXIS", 1),
@@ -113,10 +114,19 @@ test("BZERO/BSCALE scale to Float64; BLANK becomes NaN", async () => {
     ],
     be([0, 5, -1, 7], 16),
   );
-  const img = await readImage(hdu, reader);
-  assert.ok(img.data instanceof Float64Array);
-  assert.deepEqual([...img.data], [10, 20, NaN, 24]);
-  assert.equal(img.blank, -1);
+  const a16 = await readImage(a.hdu, a.reader);
+  assert.ok(a16.data instanceof Float32Array);
+  assert.deepEqual([...a16.data], [10, 20, NaN, 24]);
+  assert.equal(a16.blank, -1);
+
+  // BITPIX 32 scaled -> Float64Array (32-bit ints exceed float32 precision).
+  const b = imageHdu(
+    [card("BITPIX", 32), card("NAXIS", 1), card("NAXIS1", 2), card("BSCALE", 2), card("BZERO", 1)],
+    be([3, 100], 32),
+  );
+  const b32 = await readImage(b.hdu, b.reader);
+  assert.ok(b32.data instanceof Float64Array);
+  assert.deepEqual([...b32.data], [7, 201]);
 });
 
 test("unsigned-integer convention: 16/8/64", async () => {
@@ -242,7 +252,7 @@ test("region honours scaling and the raw opt-out", async () => {
   const data = be([0, 1, 2, 3, 4], 16);
   const scaled = imageHdu(cards, data);
   const s = await readImage(scaled.hdu, scaled.reader, { region: { start: [1], shape: [3] } });
-  assert.ok(s.data instanceof Float64Array);
+  assert.ok(s.data instanceof Float32Array); // BITPIX 16 scaled -> float32
   assert.deepEqual([...s.data], [12, 14, 16]);
 
   const raw = imageHdu(cards, data);
