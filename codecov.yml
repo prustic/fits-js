@@ -1,0 +1,29 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 2%
+        if_not_found: success
+        after_n_builds: 1
+    patch:
+      default:
+        target: 80%
+        if_not_found: success
+        after_n_builds: 1
+
+flags:
+  fits-core:
+    paths:
+      - packages/fits-core/
+    carryforward: true
+
+comment:
+  layout: "reach,diff,flags,components"
+  behavior: default
+  require_changes: false
+
+ignore:
+  - "examples/**"
+  - "tooling/**"
+  - "**/*.test.js"
