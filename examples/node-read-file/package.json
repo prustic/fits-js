@@ -1,0 +1,27 @@
+{
+  "name": "@fits-js/example-node-read-file",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Open a FITS file from disk, enumerate HDUs, read a small cutout",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --build",
+    "dev": "tsc --build --watch",
+    "start": "node dist/main.js",
+    "clean": "git clean -xdf .cache .turbo dist *.tsbuildinfo node_modules",
+    "lint": "eslint"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "@fits-js/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@fits-js/eslint-config": "workspace:*",
+    "@fits-js/typescript-config": "workspace:*",
+    "@types/node": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:"
+  }
+}
