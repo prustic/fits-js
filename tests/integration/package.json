@@ -7,7 +7,9 @@
   "scripts": {
     "build": "tsc --build",
     "clean": "git clean -xdf .cache .turbo dist *.tsbuildinfo node_modules",
-    "test:integration": "node --test $(find dist -name '*.test.js')",
+    "fits:up": "docker compose up -d --wait",
+    "fits:down": "docker compose down",
+    "test:integration": "pnpm fits:up && node --test $(find dist -name '*.test.js') && pnpm fits:down",
     "lint": "eslint"
   },
   "engines": {

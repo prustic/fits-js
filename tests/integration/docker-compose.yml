@@ -1,0 +1,15 @@
+# Brings up a real HTTP server (nginx, native Range support) over the
+# committed real-archive fixtures. The integration tests point at it.
+services:
+  fits-archive:
+    image: nginx:1.27-alpine
+    volumes:
+      - ../../packages/fits-core/test-fixtures:/usr/share/nginx/html:ro
+    ports:
+      - "18080:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost/fos-mef.fits || exit 1"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+      start_period: 1s
