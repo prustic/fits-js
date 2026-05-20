@@ -26,6 +26,12 @@ export interface ParseHeaderResult {
   readonly byteLength: number;
   /** Standard deviations recovered from in lenient mode. */
   readonly warnings: readonly string[];
+  /**
+   * `true` when an `END` card was found within the supplied bytes. Reader
+   * walkers use this to decide whether to fetch another block rather than
+   * matching warning text.
+   */
+  readonly endFound: boolean;
 }
 
 const latin1 = new TextDecoder("latin1");
@@ -143,5 +149,5 @@ export function parseHeader(
   }
 
   const byteLength = Math.ceil(offset / BLOCK) * BLOCK;
-  return { header: new FitsHeader(cards), byteLength, warnings };
+  return { header: new FitsHeader(cards), byteLength, warnings, endFound: ended };
 }

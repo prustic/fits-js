@@ -1,6 +1,11 @@
-import { FitsStructureError, FitsUnsupportedError } from "../errors.js";
+import { FitsIoError, FitsStructureError, FitsUnsupportedError } from "../errors.js";
 import type { FitsHeader } from "../header/header.js";
-import { parseHeader, type ParseHeaderOptions } from "../header/parse-header.js";
+import {
+  parseHeader,
+  type ParseHeaderOptions,
+  type ParseHeaderResult,
+} from "../header/parse-header.js";
+import type { RandomAccessReader } from "../io/reader.js";
 import type { Hdu, HduType } from "./hdu.js";
 
 const BLOCK = 2880;
@@ -106,6 +111,110 @@ function isAllZero(bytes: Uint8Array): boolean {
   return true;
 }
 
+interface HduStep {
+  readonly hdu: Hdu;
+  readonly nextOffset: number;
+  readonly stop: boolean;
+}
+
+/**
+ * @internal The per-HDU body shared by {@link readHdus} (over a buffer) and
+ * {@link openFits} (over a reader): the structural checks, classification,
+ * sizing, and the truncation / strict-lenient contract. The two callers
+ * differ only in how header bytes are obtained; everything from the parsed
+ * header to the pushed {@link Hdu} lives here so they cannot drift.
+ *
+ * `total` is the source length (a buffer's length, a reader's `size`, or
+ * `undefined` when the source length is unknown). `headerComplete` is false
+ * when the header ran past the bytes that were available.
+ */
+function buildHdu(
+  parsed: ParseHeaderResult,
+  offset: number,
+  index: number,
+  total: number | undefined,
+  headerComplete: boolean,
+  strict: boolean,
+  warnings: string[],
+): HduStep {
+  const header = parsed.header;
+
+  if (index === 0 && !header.has("SIMPLE")) {
+    const msg = "primary header has no SIMPLE keyword";
+    if (strict) throw new FitsStructureError(msg, { hduIndex: 0 });
+    warnings.push(msg);
+  }
+
+  if (
+    index === 0 &&
+    (header.getNumber("NAXIS") ?? 0) >= 1 &&
+    header.getNumber("NAXIS1") === 0 &&
+    header.getBoolean("GROUPS") === true
+  ) {
+    throw new FitsUnsupportedError("random-groups format is not supported", { hduIndex: 0 });
+  }
+
+  if (index > 0 && !header.has("XTENSION")) {
+    const msg = `extension HDU ${index} has no XTENSION keyword`;
+    if (strict) throw new FitsStructureError(msg, { hduIndex: index });
+    warnings.push(msg);
+  }
+
+  const type = classify(header, index);
+  const dataOffset = offset + parsed.byteLength;
+  const base = {
+    index,
+    type,
+    header,
+    name: header.getString("EXTNAME"),
+    version: header.getNumber("EXTVER"),
+  };
+
+  if (!headerComplete) {
+    const msg = `HDU ${index} header is truncated (runs past end of input)`;
+    if (strict) throw new FitsStructureError(msg, { hduIndex: index });
+    warnings.push(msg);
+    return {
+      hdu: {
+        ...base,
+        dataOffset: total !== undefined ? Math.min(dataOffset, total) : dataOffset,
+        dataByteLength: 0,
+        dataSizeKnown: false,
+      },
+      nextOffset: offset,
+      stop: true,
+    };
+  }
+
+  const size = dataBytes(header, { strict, hduIndex: index, warn: (m) => warnings.push(m) });
+  if (size === undefined) {
+    warnings.push(`HDU enumeration stopped at HDU ${index}`);
+    return {
+      hdu: { ...base, dataOffset, dataByteLength: 0, dataSizeKnown: false },
+      nextOffset: offset,
+      stop: true,
+    };
+  }
+
+  const padded = Math.ceil(size / BLOCK) * BLOCK;
+  let dataByteLength = padded;
+  let dataSizeKnown = true;
+  if (total !== undefined && dataOffset + padded > total) {
+    const msg = `HDU ${index} data unit is truncated`;
+    if (strict) throw new FitsStructureError(msg, { hduIndex: index });
+    warnings.push(msg);
+    dataByteLength = Math.max(0, total - dataOffset);
+    dataSizeKnown = false;
+  }
+
+  const nextOffset = dataOffset + dataByteLength;
+  return {
+    hdu: { ...base, dataOffset, dataByteLength, dataSizeKnown },
+    nextOffset,
+    stop: nextOffset <= offset,
+  };
+}
+
 /**
  * Walk every Header-Data Unit in a FITS source. Headers are parsed; data
  * units are located and measured but not decoded, so the whole structure of
@@ -131,7 +240,7 @@ function isAllZero(bytes: Uint8Array): boolean {
  */
 export function readHdus(bytes: Uint8Array, options: ParseHeaderOptions = {}): ReadHdusResult {
   if (!(bytes instanceof Uint8Array)) {
-    throw new FitsStructureError("readHdus requires a Uint8Array");
+    throw new FitsIoError("readHdus requires a Uint8Array");
   }
   const strict = options.strict ?? false;
   const warnings: string[] = [];
@@ -142,103 +251,133 @@ export function readHdus(bytes: Uint8Array, options: ParseHeaderOptions = {}): R
   while (offset + BLOCK <= bytes.length) {
     if (isAllZero(bytes.subarray(offset, offset + BLOCK))) break;
 
-    const sub = bytes.subarray(offset);
-    const parsed = parseHeader(sub, options);
+    const parsed = parseHeader(bytes.subarray(offset), options);
     warnings.push(...parsed.warnings);
-    const header = parsed.header;
+    const headerComplete = offset + parsed.byteLength <= bytes.length;
 
-    if (index === 0 && !header.has("SIMPLE")) {
-      const msg = "primary header has no SIMPLE keyword";
-      if (strict) throw new FitsStructureError(msg, { hduIndex: 0 });
-      warnings.push(msg);
+    const step = buildHdu(parsed, offset, index, bytes.length, headerComplete, strict, warnings);
+    hdus.push(step.hdu);
+    if (step.stop) break;
+    offset = step.nextOffset;
+    index++;
+  }
+
+  return { hdus, warnings };
+}
+
+function concatBlocks(blocks: Uint8Array[]): Uint8Array {
+  if (blocks.length === 1) return blocks[0];
+  const out = new Uint8Array(blocks.length * BLOCK);
+  blocks.forEach((b, i) => out.set(b, i * BLOCK));
+  return out;
+}
+
+/** Options for {@link openFits}. */
+export interface OpenFitsOptions extends ParseHeaderOptions {
+  /**
+   * Cap on how many 2880-byte blocks a single header may span before
+   * enumeration stops, used to bound the cost of a malformed source that
+   * never emits `END`. Default 1000 (~36 000 cards), far beyond any
+   * conforming header.
+   */
+  maxHeaderBlocks?: number;
+}
+
+/**
+ * Walk every Header-Data Unit through a {@link RandomAccessReader}, reading
+ * only header blocks: each data unit is located and measured from its
+ * keywords then seeked past, never fetched, so a remote file is enumerated
+ * without materializing it and a later {@link readImage} cutout fetches only
+ * its region.
+ *
+ * Sizing, classification, random-groups rejection, and the strict/lenient
+ * contract are the *same code* as {@link readHdus} (the per-HDU body and the
+ * `parseHeader` END detection are shared, not reimplemented), so for
+ * well-formed FITS the enumerated HDUs are identical. On malformed or
+ * truncated input both fail safe (`dataSizeKnown: false`, nothing unsafe
+ * read), but the reported `dataOffset` and warnings can differ: with a
+ * missing `END`, `openFits` caps the scan at `maxHeaderBlocks` blocks, while
+ * the in-memory `readHdus` is bounded only by the buffer length. The sync
+ * {@link readHdus} is unchanged for in-memory inputs.
+ *
+ * With `reader.size` known, `dataSizeKnown` reflects whether the declared
+ * data unit fits within it. With `reader.size` `undefined` (a source of
+ * unknown length) the header-declared length is trusted, `dataSizeKnown` is
+ * `true` on that basis alone, and an actually short source is caught by
+ * {@link readImage}'s own truncation check, not here.
+ *
+ * @example
+ * ```ts
+ * const reader = new HttpRangeReader(url);
+ * const { hdus } = await openFits(reader);
+ * const tile = await readImage(hdus[0], reader, {
+ *   region: { start: [4096, 4096], shape: [256, 256] },
+ * });
+ * ```
+ *
+ * @see [FITS Standard v4.0 §3.3-3.4: primary HDU and extensions](https://fits.gsfc.nasa.gov/fits_standard.html) (random groups: §6)
+ */
+export async function openFits(
+  reader: RandomAccessReader,
+  options: OpenFitsOptions = {},
+): Promise<ReadHdusResult> {
+  if (reader == null || typeof reader.read !== "function") {
+    throw new FitsIoError("openFits requires a RandomAccessReader");
+  }
+  const strict = options.strict ?? false;
+  const warnings: string[] = [];
+  const hdus: Hdu[] = [];
+  const total = reader.size;
+
+  const readBlock = async (at: number): Promise<Uint8Array | null> => {
+    const b = await reader.read(at, BLOCK);
+    // Short read is EOF; an over-delivering reader is trimmed, not treated as EOF.
+    return b.length < BLOCK ? null : b.subarray(0, BLOCK);
+  };
+
+  let offset = 0;
+  let index = 0;
+  for (;;) {
+    const first = await readBlock(offset);
+    if (first === null || isAllZero(first)) break;
+
+    // Grow lenient: parseHeader's strict mode throws on the partial first
+    // block before the loop can fetch block two. Authoritative strict re-parse
+    // runs below once the full header is in hand.
+    const maxBlocks = options.maxHeaderBlocks ?? 1000;
+    const lenient = { ...options, strict: false };
+
+    const blocks = [first];
+    let parsed = parseHeader(first, lenient);
+    // O(N^2) in card count, bounded by maxBlocks. Raising the cap without an
+    // incremental parseHeader lets a no-END source dominate.
+    while (!parsed.endFound) {
+      if (blocks.length >= maxBlocks) {
+        const msg = `HDU ${index} header exceeds ${maxBlocks} blocks without END`;
+        if (strict) throw new FitsStructureError(msg, { hduIndex: index });
+        warnings.push(msg);
+        break;
+      }
+      const nb = await readBlock(offset + blocks.length * BLOCK);
+      if (nb === null) break;
+      blocks.push(nb);
+      parsed = parseHeader(concatBlocks(blocks), lenient);
     }
 
-    if (
-      index === 0 &&
-      (header.getNumber("NAXIS") ?? 0) >= 1 &&
-      header.getNumber("NAXIS1") === 0 &&
-      header.getBoolean("GROUPS") === true
-    ) {
-      throw new FitsUnsupportedError("random-groups format is not supported", { hduIndex: 0 });
+    // Strict needs a re-parse to surface throws the lenient loop suppressed.
+    if (strict) {
+      parsed = parseHeader(concatBlocks(blocks), options);
     }
+    warnings.push(...parsed.warnings);
 
-    if (index > 0 && !header.has("XTENSION")) {
-      const msg = `extension HDU ${index} has no XTENSION keyword`;
-      if (strict) throw new FitsStructureError(msg, { hduIndex: index });
-      warnings.push(msg);
-    }
+    // Positional, matching readHdus. Unknown size is trusted; readImage
+    // backstops a short source.
+    const headerComplete = total === undefined || offset + parsed.byteLength <= total;
 
-    const type = classify(header, index);
-    const dataOffset = offset + parsed.byteLength;
-    const name = header.getString("EXTNAME");
-    const version = header.getNumber("EXTVER");
-
-    if (dataOffset > bytes.length) {
-      // The header itself ran past the buffer (no END, partial download):
-      // it was never fully parsed, so do not report a sized HDU.
-      const msg = `HDU ${index} header is truncated (runs past end of input)`;
-      if (strict) throw new FitsStructureError(msg, { hduIndex: index });
-      warnings.push(msg);
-      hdus.push({
-        index,
-        type,
-        header,
-        name,
-        version,
-        dataOffset: bytes.length,
-        dataByteLength: 0,
-        dataSizeKnown: false,
-      });
-      break;
-    }
-
-    const size = dataBytes(header, {
-      strict,
-      hduIndex: index,
-      warn: (m) => warnings.push(m),
-    });
-
-    if (size === undefined) {
-      // Layout unknowable: record this HDU, do not guess past it.
-      hdus.push({
-        index,
-        type,
-        header,
-        name,
-        version,
-        dataOffset,
-        dataByteLength: 0,
-        dataSizeKnown: false,
-      });
-      warnings.push(`HDU enumeration stopped at HDU ${index}`);
-      break;
-    }
-
-    const padded = Math.ceil(size / BLOCK) * BLOCK;
-    let dataByteLength = padded;
-    let dataSizeKnown = true;
-    if (dataOffset + padded > bytes.length) {
-      const msg = `HDU ${index} data unit is truncated`;
-      if (strict) throw new FitsStructureError(msg, { hduIndex: index });
-      warnings.push(msg);
-      dataByteLength = Math.max(0, bytes.length - dataOffset);
-      dataSizeKnown = false;
-    }
-
-    hdus.push({
-      index,
-      type,
-      header,
-      name,
-      version,
-      dataOffset,
-      dataByteLength,
-      dataSizeKnown,
-    });
-
-    const next = dataOffset + dataByteLength;
-    if (next <= offset) break; // no forward progress: stop rather than loop
-    offset = next;
+    const step = buildHdu(parsed, offset, index, total, headerComplete, strict, warnings);
+    hdus.push(step.hdu);
+    if (step.stop) break;
+    offset = step.nextOffset;
     index++;
   }
 
