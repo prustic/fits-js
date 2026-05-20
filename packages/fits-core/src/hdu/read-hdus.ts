@@ -272,6 +272,17 @@ function concatBlocks(blocks: Uint8Array[]): Uint8Array {
   return out;
 }
 
+/** Options for {@link openFits}. */
+export interface OpenFitsOptions extends ParseHeaderOptions {
+  /**
+   * Cap on how many 2880-byte blocks a single header may span before
+   * enumeration stops, used to bound the cost of a malformed source that
+   * never emits `END`. Default 1000 (~36 000 cards), far beyond any
+   * conforming header.
+   */
+  maxHeaderBlocks?: number;
+}
+
 /**
  * Walk every Header-Data Unit through a {@link RandomAccessReader}, reading
  * only header blocks: each data unit is located and measured from its
@@ -284,9 +295,9 @@ function concatBlocks(blocks: Uint8Array[]): Uint8Array {
  * `parseHeader` END detection are shared, not reimplemented), so for
  * well-formed FITS the enumerated HDUs are identical. On malformed or
  * truncated input both fail safe (`dataSizeKnown: false`, nothing unsafe
- * read), but the reported `dataOffset` and warnings can differ: a missing
- * END makes `readHdus` scan the rest of its buffer while `openFits`
- * deliberately will not read data units to hunt for one. The sync
+ * read), but the reported `dataOffset` and warnings can differ: with a
+ * missing `END`, `openFits` caps the scan at `maxHeaderBlocks` blocks, while
+ * the in-memory `readHdus` is bounded only by the buffer length. The sync
  * {@link readHdus} is unchanged for in-memory inputs.
  *
  * With `reader.size` known, `dataSizeKnown` reflects whether the declared
@@ -308,7 +319,7 @@ function concatBlocks(blocks: Uint8Array[]): Uint8Array {
  */
 export async function openFits(
   reader: RandomAccessReader,
-  options: ParseHeaderOptions = {},
+  options: OpenFitsOptions = {},
 ): Promise<ReadHdusResult> {
   if (reader == null || typeof reader.read !== "function") {
     throw new FitsIoError("openFits requires a RandomAccessReader");
@@ -320,7 +331,9 @@ export async function openFits(
 
   const readBlock = async (at: number): Promise<Uint8Array | null> => {
     const b = await reader.read(at, BLOCK);
-    return b.length === BLOCK ? b : null; // a short read is end of input
+    // Short reads are end of input; an over-delivering reader (contract
+    // violation) is trimmed rather than treated as EOF.
+    return b.length < BLOCK ? null : b.subarray(0, BLOCK);
   };
 
   let offset = 0;
@@ -340,6 +353,9 @@ export async function openFits(
 
     const blocks = [first];
     let parsed = parseHeader(first, lenient);
+    // The re-parse on every iteration is O(N^2) in card count; bounded by
+    // maxBlocks. Do not raise the cap to very large values without an
+    // incremental parseHeader, or a pathological no-END source can dominate.
     while (!parsed.endFound) {
       if (blocks.length >= maxBlocks) {
         const msg = `HDU ${index} header exceeds ${maxBlocks} blocks without END`;
@@ -353,9 +369,11 @@ export async function openFits(
       parsed = parseHeader(concatBlocks(blocks), lenient);
     }
 
-    // Authoritative re-parse with the user's options: strict throws fire here
-    // (per-card violations and the no-END case alike), matching readHdus.
-    parsed = parseHeader(concatBlocks(blocks), options);
+    // Authoritative re-parse only when strict: it surfaces throws the lenient
+    // loop suppressed. In lenient mode the loop's result is already canonical.
+    if (strict) {
+      parsed = parseHeader(concatBlocks(blocks), options);
+    }
     warnings.push(...parsed.warnings);
 
     // Completeness is positional, the same rule readHdus uses: the header

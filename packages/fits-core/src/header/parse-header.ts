@@ -14,14 +14,6 @@ export interface ParseHeaderOptions {
    * astropy and CFITSIO tolerate real-world archive files.
    */
   strict?: boolean;
-  /**
-   * Cap on how many 2880-byte blocks a single header may span before
-   * enumeration stops, used by reader-backed walkers to bound the cost of a
-   * malformed source that never emits `END`. Not consulted by
-   * {@link parseHeader} itself, which scans only the bytes it is given.
-   * Default 1000 (~36 000 cards), far beyond any conforming header.
-   */
-  maxHeaderBlocks?: number;
 }
 
 /** Result of {@link parseHeader}. */
