@@ -8,9 +8,6 @@ import {
   type RandomAccessReader,
 } from "@fits-js/core";
 
-// nginx in docker compose (see docker-compose.yml) serves the committed
-// real-archive fixtures with native Range support; the npm `test:integration`
-// script brings it up and tears it down around the run.
 const URL = "http://localhost:18080/fos-mef.fits";
 const N1 = 2064; // primary NAXIS1
 const N2 = 2; // primary NAXIS2
