@@ -1,0 +1,10 @@
+{
+  "extends": "@fits-js/typescript-config/base",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "incremental": true
+  },
+  "include": ["src"],
+  "references": [{ "path": "../../packages/fits-core" }]
+}

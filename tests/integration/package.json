@@ -1,0 +1,26 @@
+{
+  "name": "@fits-js/integration-tests",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Integration tests against live public FITS archives",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "git clean -xdf .cache .turbo dist *.tsbuildinfo node_modules",
+    "test:integration": "node --test $(find dist -name '*.test.js')",
+    "lint": "eslint"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "@fits-js/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@fits-js/eslint-config": "workspace:*",
+    "@fits-js/typescript-config": "workspace:*",
+    "@types/node": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:"
+  }
+}
