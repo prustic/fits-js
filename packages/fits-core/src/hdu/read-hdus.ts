@@ -186,6 +186,18 @@ function buildHdu(
     };
   }
 
+  // No END card: the warning and the HDU flag must agree, sizing keywords
+  // from a header that did not terminate are not trusted. readImage refuses
+  // to read its declared data unit. (Strict already threw via parseHeader.)
+  if (!parsed.endFound) {
+    warnings.push(`HDU enumeration stopped at HDU ${index}`);
+    return {
+      hdu: { ...base, dataOffset, dataByteLength: 0, dataSizeKnown: false },
+      nextOffset: offset,
+      stop: true,
+    };
+  }
+
   const size = dataBytes(header, { strict, hduIndex: index, warn: (m) => warnings.push(m) });
   if (size === undefined) {
     warnings.push(`HDU enumeration stopped at HDU ${index}`);
@@ -281,6 +293,11 @@ export interface OpenFitsOptions extends ParseHeaderOptions {
    * conforming header.
    */
   maxHeaderBlocks?: number;
+  /**
+   * Cancels the walk. Checked before each block read, so an abort takes
+   * effect promptly and rejects with the signal's reason.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -330,6 +347,7 @@ export async function openFits(
   const total = reader.size;
 
   const readBlock = async (at: number): Promise<Uint8Array | null> => {
+    options.signal?.throwIfAborted();
     const b = await reader.read(at, BLOCK);
     // Short read is EOF; an over-delivering reader is trimmed, not treated as EOF.
     return b.length < BLOCK ? null : b.subarray(0, BLOCK);
