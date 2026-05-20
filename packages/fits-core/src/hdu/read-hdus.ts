@@ -186,9 +186,7 @@ function buildHdu(
     };
   }
 
-  // No END card: the warning and the HDU flag must agree, sizing keywords
-  // from a header that did not terminate are not trusted. readImage refuses
-  // to read its declared data unit. (Strict already threw via parseHeader.)
+  // No END: do not trust sizing of an unterminated header.
   if (!parsed.endFound) {
     warnings.push(`HDU enumeration stopped at HDU ${index}`);
     return {

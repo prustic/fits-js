@@ -228,10 +228,6 @@ test("strict + no END at EOF throws FitsHeaderError, matching readHdus", async (
 });
 
 test("lenient + no END with valid sizing keywords still yields dataSizeKnown false", async () => {
-  // Pre-tightening this would have set dataSizeKnown=true because the
-  // declared data unit happens to fit the buffer. Now the warning ("no END
-  // ...") and the HDU flag agree: a header that did not terminate is not
-  // trusted to size its data unit.
   const buf = blocks(
     [
       "SIMPLE  =                    T",
