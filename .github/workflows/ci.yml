@@ -44,11 +44,7 @@ jobs:
       - run: pnpm format
       - run: pnpm test:coverage
 
-      # Live network test against a public archive. Runs once (not on both
-      # matrix legs); a host outage is skipped at the test level, so a
-      # third-party blip cannot red the build.
       - run: pnpm test:integration
-        if: ${{ matrix.node-version == '22' }}
 
       - uses: codecov/codecov-action@v5
         if: ${{ always() && matrix.node-version == '22' }}
