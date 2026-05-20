@@ -22,6 +22,9 @@
       "dependsOn": ["build"],
       "outputs": ["coverage/**"]
     },
+    "test:integration": {
+      "dependsOn": ["build"]
+    },
     "clean": {
       "cache": false
     }

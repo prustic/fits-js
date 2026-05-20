@@ -7,5 +7,10 @@
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": ["@fits-js/eslint-config", "@fits-js/prettier-config", "@fits-js/typescript-config"]
+  "ignore": [
+    "@fits-js/eslint-config",
+    "@fits-js/prettier-config",
+    "@fits-js/typescript-config",
+    "@fits-js/integration-tests"
+  ]
 }
