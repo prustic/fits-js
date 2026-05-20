@@ -14,6 +14,14 @@ export interface ParseHeaderOptions {
    * astropy and CFITSIO tolerate real-world archive files.
    */
   strict?: boolean;
+  /**
+   * Cap on how many 2880-byte blocks a single header may span before
+   * enumeration stops, used by reader-backed walkers to bound the cost of a
+   * malformed source that never emits `END`. Not consulted by
+   * {@link parseHeader} itself, which scans only the bytes it is given.
+   * Default 1000 (~36 000 cards), far beyond any conforming header.
+   */
+  maxHeaderBlocks?: number;
 }
 
 /** Result of {@link parseHeader}. */
@@ -26,6 +34,12 @@ export interface ParseHeaderResult {
   readonly byteLength: number;
   /** Standard deviations recovered from in lenient mode. */
   readonly warnings: readonly string[];
+  /**
+   * `true` when an `END` card was found within the supplied bytes. Reader
+   * walkers use this to decide whether to fetch another block rather than
+   * matching warning text.
+   */
+  readonly endFound: boolean;
 }
 
 const latin1 = new TextDecoder("latin1");
@@ -143,5 +157,5 @@ export function parseHeader(
   }
 
   const byteLength = Math.ceil(offset / BLOCK) * BLOCK;
-  return { header: new FitsHeader(cards), byteLength, warnings };
+  return { header: new FitsHeader(cards), byteLength, warnings, endFound: ended };
 }

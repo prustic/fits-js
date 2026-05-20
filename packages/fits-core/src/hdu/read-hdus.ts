@@ -8,10 +8,6 @@ import {
 import type { RandomAccessReader } from "../io/reader.js";
 import type { Hdu, HduType } from "./hdu.js";
 
-// parseHeader is the single source of truth for where a header ends; this is
-// the exact message it emits when it scans all input without an END card.
-const NO_END_WARNING = "no END card found before end of input";
-
 const BLOCK = 2880;
 const VALID_BITPIX = new Set([8, 16, 32, 64, -32, -64]);
 
@@ -244,7 +240,7 @@ function buildHdu(
  */
 export function readHdus(bytes: Uint8Array, options: ParseHeaderOptions = {}): ReadHdusResult {
   if (!(bytes instanceof Uint8Array)) {
-    throw new FitsStructureError("readHdus requires a Uint8Array");
+    throw new FitsIoError("readHdus requires a Uint8Array");
   }
   const strict = options.strict ?? false;
   const warnings: string[] = [];
@@ -333,21 +329,39 @@ export async function openFits(
     const first = await readBlock(offset);
     if (first === null || isAllZero(first)) break;
 
-    // Grow the header a block at a time until parseHeader stops reporting a
-    // missing END (parseHeader owns END detection) or the source runs out.
+    // Grow the header lenient: parseHeader's strict mode would throw on the
+    // partial first block (no END yet) before the loop could fetch block two,
+    // so multi-block headers must drive the loop without the user's strict.
+    // Strict-mode violations are reported by the final authoritative parse
+    // below, after the full header is in hand. The bound stops a malformed
+    // remote source that never emits END from issuing unbounded reads.
+    const maxBlocks = options.maxHeaderBlocks ?? 1000;
+    const lenient = { ...options, strict: false };
+
     const blocks = [first];
-    let parsed = parseHeader(first, options);
-    while (parsed.warnings.includes(NO_END_WARNING)) {
+    let parsed = parseHeader(first, lenient);
+    while (!parsed.endFound) {
+      if (blocks.length >= maxBlocks) {
+        const msg = `HDU ${index} header exceeds ${maxBlocks} blocks without END`;
+        if (strict) throw new FitsStructureError(msg, { hduIndex: index });
+        warnings.push(msg);
+        break;
+      }
       const nb = await readBlock(offset + blocks.length * BLOCK);
       if (nb === null) break;
       blocks.push(nb);
-      parsed = parseHeader(concatBlocks(blocks), options);
+      parsed = parseHeader(concatBlocks(blocks), lenient);
     }
+
+    // Authoritative re-parse with the user's options: strict throws fire here
+    // (per-card violations and the no-END case alike), matching readHdus.
+    parsed = parseHeader(concatBlocks(blocks), options);
+    warnings.push(...parsed.warnings);
+
     // Completeness is positional, the same rule readHdus uses: the header
     // fits the source. (Unknown size: trust it; readImage backstops a short
-    // source.) The NO_END signal above only decides when to stop fetching.
+    // source.)
     const headerComplete = total === undefined || offset + parsed.byteLength <= total;
-    warnings.push(...parsed.warnings);
 
     const step = buildHdu(parsed, offset, index, total, headerComplete, strict, warnings);
     hdus.push(step.hdu);
