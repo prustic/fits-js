@@ -331,8 +331,7 @@ export async function openFits(
 
   const readBlock = async (at: number): Promise<Uint8Array | null> => {
     const b = await reader.read(at, BLOCK);
-    // Short reads are end of input; an over-delivering reader (contract
-    // violation) is trimmed rather than treated as EOF.
+    // Short read is EOF; an over-delivering reader is trimmed, not treated as EOF.
     return b.length < BLOCK ? null : b.subarray(0, BLOCK);
   };
 
@@ -342,20 +341,16 @@ export async function openFits(
     const first = await readBlock(offset);
     if (first === null || isAllZero(first)) break;
 
-    // Grow the header lenient: parseHeader's strict mode would throw on the
-    // partial first block (no END yet) before the loop could fetch block two,
-    // so multi-block headers must drive the loop without the user's strict.
-    // Strict-mode violations are reported by the final authoritative parse
-    // below, after the full header is in hand. The bound stops a malformed
-    // remote source that never emits END from issuing unbounded reads.
+    // Grow lenient: parseHeader's strict mode throws on the partial first
+    // block before the loop can fetch block two. Authoritative strict re-parse
+    // runs below once the full header is in hand.
     const maxBlocks = options.maxHeaderBlocks ?? 1000;
     const lenient = { ...options, strict: false };
 
     const blocks = [first];
     let parsed = parseHeader(first, lenient);
-    // The re-parse on every iteration is O(N^2) in card count; bounded by
-    // maxBlocks. Do not raise the cap to very large values without an
-    // incremental parseHeader, or a pathological no-END source can dominate.
+    // O(N^2) in card count, bounded by maxBlocks. Raising the cap without an
+    // incremental parseHeader lets a no-END source dominate.
     while (!parsed.endFound) {
       if (blocks.length >= maxBlocks) {
         const msg = `HDU ${index} header exceeds ${maxBlocks} blocks without END`;
@@ -369,16 +364,14 @@ export async function openFits(
       parsed = parseHeader(concatBlocks(blocks), lenient);
     }
 
-    // Authoritative re-parse only when strict: it surfaces throws the lenient
-    // loop suppressed. In lenient mode the loop's result is already canonical.
+    // Strict needs a re-parse to surface throws the lenient loop suppressed.
     if (strict) {
       parsed = parseHeader(concatBlocks(blocks), options);
     }
     warnings.push(...parsed.warnings);
 
-    // Completeness is positional, the same rule readHdus uses: the header
-    // fits the source. (Unknown size: trust it; readImage backstops a short
-    // source.)
+    // Positional, matching readHdus. Unknown size is trusted; readImage
+    // backstops a short source.
     const headerComplete = total === undefined || offset + parsed.byteLength <= total;
 
     const step = buildHdu(parsed, offset, index, total, headerComplete, strict, warnings);
