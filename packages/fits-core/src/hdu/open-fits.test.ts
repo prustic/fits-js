@@ -226,3 +226,31 @@ test("strict + no END at EOF throws FitsHeaderError, matching readHdus", async (
   assert.throws(() => readHdus(noEnd, { strict: true }), FitsHeaderError);
   await assert.rejects(() => openFits(new BytesReader(noEnd), { strict: true }), FitsHeaderError);
 });
+
+test("lenient + no END with valid sizing keywords still yields dataSizeKnown false", async () => {
+  const buf = blocks(
+    [
+      "SIMPLE  =                    T",
+      "BITPIX  =                    8",
+      "NAXIS   =                    1",
+      "NAXIS1  =                   10",
+    ],
+    new Uint8Array(2880).fill(1),
+  );
+  for (const result of [readHdus(buf), await openFits(new BytesReader(buf))]) {
+    assert.equal(result.hdus.length, 1);
+    assert.equal(result.hdus[0].dataSizeKnown, false);
+    assert.ok(result.warnings.some((w) => w.includes("no END card")));
+    assert.ok(result.warnings.some((w) => w.includes("enumeration stopped")));
+  }
+});
+
+test("openFits respects an AbortSignal", async () => {
+  const ac = new AbortController();
+  ac.abort();
+  const bytes = fixture("fos-mef.fits");
+  await assert.rejects(
+    () => openFits(new BytesReader(bytes), { signal: ac.signal }),
+    (e: unknown) => e instanceof Error && !(e instanceof FitsIoError) && e.name === "AbortError",
+  );
+});
