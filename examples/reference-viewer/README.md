@@ -17,6 +17,6 @@ Vite serves at `http://localhost:5173`. Pick any FITS file with a 2D
 primary or `IMAGE` extension. `pnpm build` emits a production bundle in
 `dist/`. Requires Node.js 22+ for the dev server.
 
-This example reads the full image into memory; that's deliberate for a
-viewer, but it's not how lazy access is meant to be used in production
+This example decodes the full image into memory; that's deliberate for
+a viewer, but it's not how lazy access is meant to be used in production
 (see [`http-range`](../http-range/) for the lazy-cutout pattern).
