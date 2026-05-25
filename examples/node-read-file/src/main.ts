@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
-import { NodeFileReader, openFits, readImage } from "@fits-js/core";
+import { openFits, readImage } from "@fits-js/core";
+import { NodeFileReader } from "@fits-js/core/node";
 
 const DEFAULT_FIXTURE = fileURLToPath(new URL("../fixtures/sample.fits", import.meta.url));
 
