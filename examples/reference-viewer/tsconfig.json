@@ -1,0 +1,14 @@
+{
+  "extends": "@fits-js/typescript-config/base",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023", "DOM"],
+    "types": [],
+    "composite": false,
+    "incremental": true
+  },
+  "include": ["src"]
+}

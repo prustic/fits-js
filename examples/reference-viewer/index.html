@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>fits-js reference-viewer</title>
+    <style>
+      body {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        margin: 2rem;
+        line-height: 1.5;
+      }
+      #canvas {
+        display: block;
+        margin-top: 1rem;
+        max-width: 100%;
+        height: auto;
+        image-rendering: pixelated;
+        background: #000;
+      }
+      #status {
+        margin-top: 1rem;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>fits-js reference-viewer</h1>
+    <p>Pick a FITS file to render its first 2D image to a canvas.</p>
+    <input id="file" type="file" accept=".fits,.fit,.fts,image/fits" />
+    <div id="status">No file selected.</div>
+    <canvas id="canvas"></canvas>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
