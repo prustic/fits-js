@@ -7,15 +7,20 @@ import HorseheadHero from "../../components/HorseheadHero.astro";
 
 <HorseheadHero />
 
-fits-js parses [FITS](https://fits.gsfc.nasa.gov/) files in TypeScript. It runs in
-Node, browsers, Bun, and Deno from a single browser-safe core, and it reads lazily:
-opening a file only pulls the header blocks, and a small cutout from a 4 GB cube
-only pulls the bytes that cutout covers.
+fits-js parses [FITS](https://fits.gsfc.nasa.gov/) files in TypeScript. It runs
+in Node, browsers, Bun, and Deno from a single browser-safe core. Opening a
+file reads only the header blocks, and a small cutout from a 4 GB cube reads
+only the bytes that cutout covers.
 
 ## Packages
 
-- [`@fits-js/core`](https://www.npmjs.com/package/@fits-js/core): the parser, decoder, and three browser-safe readers (`BytesReader`, `BlobReader`, `HttpRangeReader`). Zero runtime dependencies.
-- [`@fits-js/core/node`](https://www.npmjs.com/package/@fits-js/core): the Node subpath, exporting `NodeFileReader` for `fs`-backed file access. Same package, different entry point.
+fits-js ships as one npm package,
+[`@fits-js/core`](https://www.npmjs.com/package/@fits-js/core). The main
+entry exports the parser, the decoder, and three browser-safe readers
+(`BytesReader`, `BlobReader`, `HttpRangeReader`). The `@fits-js/core/node`
+subpath exports `NodeFileReader` for `fs`-backed file access, kept off the
+main entry so browser bundlers do not have to walk past `node:fs/promises`.
+No runtime dependencies.
 
 ## Install
 
@@ -68,10 +73,10 @@ for (let y = 0; y < h; y++) {
 ctx.putImageData(img, 0, 0);
 ```
 
-That is the entire pipeline: fetch bytes, open them as a FITS file, ask for the
-primary HDU's image data, paint it. The percentile clip and the Y-flip are the
-two astronomy-shaped details (FITS pixel (0,0) is bottom-left; canvas (0,0) is
-top-left).
+That is the entire pipeline. Fetch bytes, open them as a FITS file, ask for the
+primary HDU's image data, paint it. The percentile clip handles outlier pixels.
+The Y-flip handles the axis convention, since FITS pixel (0,0) is bottom-left
+while canvas (0,0) is top-left.
 
-Read on for the [Quickstart](/fits-js/quickstart/) for `NodeFileReader`,
-`HttpRangeReader`, and a few cutout patterns.
+The [Quickstart](/fits-js/quickstart/) covers `NodeFileReader`, `HttpRangeReader`,
+and a few cutout patterns.

@@ -8,16 +8,19 @@ description: What is shipped, what is next, and what is out of scope.
 The lazy random-access core. One parser running over four readers, with image
 HDU support end to end.
 
-- Header parsing: fixed and free-format cards, `CONTINUE` long strings,
-  `HIERARCH` long keywords, indexed access (`NAXISn`, `TFORMn`), duplicate
-  keyword handling, lenient recovery.
-- HDU enumeration: primary + extensions, recognition of `IMAGE`, `BINTABLE`,
-  and ASCII table extensions. Lookup by `EXTNAME`/`EXTVER`.
-- Readers: `BytesReader` (in-memory), `BlobReader` (browser `Blob`/`File`),
-  `NodeFileReader` (`fs`-backed, behind `@fits-js/core/node`),
-  `HttpRangeReader` (HTTP `Range`, with LRU paging and `If-Range`).
-- Image data: `readImage` with region cutouts, BITPIX scaling
-  (`BZERO`/`BSCALE`), unsigned-int convention, `BLANK` to `NaN`.
+- Header parsing covers fixed and free-format cards, `CONTINUE` long
+  strings, `HIERARCH` long keywords, indexed access (`NAXISn`, `TFORMn`),
+  duplicate keyword handling, and lenient recovery.
+- HDU enumeration covers primary plus extensions, with recognition of
+  `IMAGE`, `BINTABLE`, and ASCII table extensions, and lookup by
+  `EXTNAME`/`EXTVER`.
+- Readers ship as `BytesReader` (in-memory), `BlobReader` (browser
+  `Blob`/`File`), `NodeFileReader` (`fs`-backed, behind
+  `@fits-js/core/node`), and `HttpRangeReader` (HTTP `Range`, with LRU
+  paging and `If-Range`).
+- Image data is decoded by `readImage`, with region cutouts, BITPIX
+  scaling (`BZERO`/`BSCALE`), the unsigned-integer convention, and
+  `BLANK` to `NaN`.
 
 ## Next
 
@@ -31,8 +34,8 @@ HDU support end to end.
 ## Out of scope
 
 - WCS coordinate transforms (a separate library job).
-- Random groups (detected and rejected cleanly).
+- Random groups (detected and rejected).
 - Built-in image viewer or canvas rendering helpers. The library returns
-  decoded typed arrays; rendering choices belong in user code or example
+  decoded typed arrays. Rendering choices belong in user code or example
   packages like
   [`examples/reference-viewer`](https://github.com/prustic/fits-js/tree/main/examples/reference-viewer).

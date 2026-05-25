@@ -55,6 +55,17 @@ export default defineConfig({
       ],
       sidebar: [
         { label: "Quickstart", slug: "quickstart" },
+        {
+          label: "Guides",
+          items: [
+            { label: "Reading a FITS file", slug: "guides/reading-a-file" },
+            { label: "Reading over HTTP", slug: "guides/reading-over-http" },
+            { label: "Working with HDUs", slug: "guides/working-with-hdus" },
+            { label: "Working with image data", slug: "guides/working-with-image-data" },
+            { label: "Working with headers", slug: "guides/working-with-headers" },
+            { label: "Error handling", slug: "guides/error-handling" },
+          ],
+        },
         typeDocSidebarGroup,
         {
           label: "Project",

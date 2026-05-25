@@ -17,14 +17,14 @@ pnpm blt
 ```
 
 `pnpm blt` builds, lints, and tests every workspace package. Integration
-tests live in `tests/integration/` and need Docker; run them with `pnpm
+tests live in `tests/integration/` and need Docker. Run them with `pnpm
 test:integration`.
 
 ## Style
 
 - TypeScript with `strict: true`.
-- No regex on parser input or untrusted bytes; use explicit bounded scans.
-- Public surface gets TSDoc; internals stay terse.
+- No regex on parser input or untrusted bytes. Use explicit bounded scans.
+- Public surface gets TSDoc. Internals stay terse.
 - House style is documented in the repo's `CLAUDE.md` and the shared
   [code-style guide](https://github.com/prustic/oss-instructions-n-docs/blob/main/code-style.md).
 
