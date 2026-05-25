@@ -7,7 +7,6 @@ export {
 } from "./errors.js";
 export { BytesReader, BlobReader, type RandomAccessReader } from "./io/reader.js";
 export { HttpRangeReader, type HttpRangeReaderOptions } from "./io/http-reader.js";
-export { NodeFileReader } from "./io/node-file-reader.js";
 export { findHdu, type Hdu, type HduType } from "./hdu/hdu.js";
 export { readHdus, openFits, type ReadHdusResult, type OpenFitsOptions } from "./hdu/read-hdus.js";
 export {
