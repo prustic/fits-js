@@ -12,6 +12,7 @@
     "@fits-js/prettier-config",
     "@fits-js/typescript-config",
     "@fits-js/integration-tests",
-    "@fits-js/example-node-read-file"
+    "@fits-js/example-node-read-file",
+    "@fits-js/example-http-range"
   ]
 }
