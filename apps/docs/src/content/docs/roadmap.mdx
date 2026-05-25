@@ -1,0 +1,38 @@
+---
+title: Roadmap
+description: What is shipped, what is next, and what is out of scope.
+---
+
+## 0.1.0 (shipping)
+
+The lazy random-access core. One parser running over four readers, with image
+HDU support end to end.
+
+- Header parsing: fixed and free-format cards, `CONTINUE` long strings,
+  `HIERARCH` long keywords, indexed access (`NAXISn`, `TFORMn`), duplicate
+  keyword handling, lenient recovery.
+- HDU enumeration: primary + extensions, recognition of `IMAGE`, `BINTABLE`,
+  and ASCII table extensions. Lookup by `EXTNAME`/`EXTVER`.
+- Readers: `BytesReader` (in-memory), `BlobReader` (browser `Blob`/`File`),
+  `NodeFileReader` (`fs`-backed, behind `@fits-js/core/node`),
+  `HttpRangeReader` (HTTP `Range`, with LRU paging and `If-Range`).
+- Image data: `readImage` with region cutouts, BITPIX scaling
+  (`BZERO`/`BSCALE`), unsigned-int convention, `BLANK` to `NaN`.
+
+## Next
+
+- BINTABLE and ASCII table decode, with column accessors.
+- Tile-compressed images (`RICE_1`, `GZIP_1`, `GZIP_2`, `HCOMPRESS_1`,
+  `PLIO_1`).
+- `.fits.gz` support via `DecompressionStream`.
+- Writer side: `openFitsForWrite`, primary + extension write, header
+  mutation.
+
+## Out of scope
+
+- WCS coordinate transforms (a separate library job).
+- Random groups (detected and rejected cleanly).
+- Built-in image viewer or canvas rendering helpers. The library returns
+  decoded typed arrays; rendering choices belong in user code or example
+  packages like
+  [`examples/reference-viewer`](https://github.com/prustic/fits-js/tree/main/examples/reference-viewer).

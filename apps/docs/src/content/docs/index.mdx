@@ -1,0 +1,77 @@
+---
+title: fits-js
+description: A TypeScript FITS parser. Lazy random-access reads in Node and the browser.
+---
+
+import HorseheadHero from "../../components/HorseheadHero.astro";
+
+<HorseheadHero />
+
+fits-js parses [FITS](https://fits.gsfc.nasa.gov/) files in TypeScript. It runs in
+Node, browsers, Bun, and Deno from a single browser-safe core, and it reads lazily:
+opening a file only pulls the header blocks, and a small cutout from a 4 GB cube
+only pulls the bytes that cutout covers.
+
+## Packages
+
+- [`@fits-js/core`](https://www.npmjs.com/package/@fits-js/core): the parser, decoder, and three browser-safe readers (`BytesReader`, `BlobReader`, `HttpRangeReader`). Zero runtime dependencies.
+- [`@fits-js/core/node`](https://www.npmjs.com/package/@fits-js/core): the Node subpath, exporting `NodeFileReader` for `fs`-backed file access. Same package, different entry point.
+
+## Install
+
+```sh
+pnpm add @fits-js/core
+```
+
+Node 22 or later. In the browser, any environment with `fetch`, `Blob`, and `TypedArray` works.
+
+## The code that renders the image above
+
+```ts
+import { BytesReader, openFits, readImage } from "@fits-js/core";
+
+const bytes = new Uint8Array(await (await fetch("/horsehead.fits")).arrayBuffer());
+const reader = new BytesReader(bytes);
+const { hdus } = await openFits(reader);
+const primary = hdus[0];
+
+const { data } = await readImage(primary, reader);
+const w = primary.header.getNumber("NAXIS1")!;
+const h = primary.header.getNumber("NAXIS2")!;
+
+const finite = new Float64Array(data.length);
+let n = 0;
+for (let i = 0; i < data.length; i++) {
+  const v = Number(data[i]);
+  if (Number.isFinite(v)) finite[n++] = v;
+}
+const sorted = finite.subarray(0, n).sort();
+const lo = sorted[Math.floor(n * 0.005)];
+const hi = sorted[Math.floor(n * 0.995)];
+const scale = 255 / (hi - lo);
+
+const canvas = document.getElementById("horsehead") as HTMLCanvasElement;
+canvas.width = w;
+canvas.height = h;
+const ctx = canvas.getContext("2d")!;
+const img = ctx.createImageData(w, h);
+for (let y = 0; y < h; y++) {
+  const srcY = h - 1 - y;
+  for (let x = 0; x < w; x++) {
+    const v = Number(data[srcY * w + x]);
+    const norm = Number.isFinite(v) ? Math.max(0, Math.min(255, (v - lo) * scale)) : 0;
+    const i = (y * w + x) * 4;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = norm;
+    img.data[i + 3] = 255;
+  }
+}
+ctx.putImageData(img, 0, 0);
+```
+
+That is the entire pipeline: fetch bytes, open them as a FITS file, ask for the
+primary HDU's image data, paint it. The percentile clip and the Y-flip are the
+two astronomy-shaped details (FITS pixel (0,0) is bottom-left; canvas (0,0) is
+top-left).
+
+Read on for the [Quickstart](/fits-js/quickstart/) for `NodeFileReader`,
+`HttpRangeReader`, and a few cutout patterns.

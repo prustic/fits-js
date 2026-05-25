@@ -1,0 +1,44 @@
+---
+title: Contributing
+description: How fits-js development works and what review expects.
+---
+
+fits-js development happens on
+[github.com/prustic/fits-js](https://github.com/prustic/fits-js). All work
+goes through pull requests against `main`.
+
+## Local setup
+
+```sh
+git clone https://github.com/prustic/fits-js.git
+cd fits-js
+pnpm install
+pnpm blt
+```
+
+`pnpm blt` builds, lints, and tests every workspace package. Integration
+tests live in `tests/integration/` and need Docker; run them with `pnpm
+test:integration`.
+
+## Style
+
+- TypeScript with `strict: true`.
+- No regex on parser input or untrusted bytes; use explicit bounded scans.
+- Public surface gets TSDoc; internals stay terse.
+- House style is documented in the repo's `CLAUDE.md` and the shared
+  [code-style guide](https://github.com/prustic/oss-instructions-n-docs/blob/main/code-style.md).
+
+## Tests
+
+Every parser change ships with a unit test against committed fixtures.
+Real-archive fixtures live in `packages/fits-core/test-fixtures/`, and the
+integration suite cross-checks `HttpRangeReader` + `openFits` + `readImage`
+against the same bytes over a dockerized HTTP server with native `Range`
+support. The oracle for new tests is the bytes themselves, not committed
+"expected" output.
+
+## Reporting bugs
+
+Open an issue with a minimal FITS file (or a public archive URL) that
+reproduces. If the file is private, the offending headers and a description
+of the structure are usually enough.
