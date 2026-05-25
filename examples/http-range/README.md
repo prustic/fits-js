@@ -13,10 +13,9 @@ pnpm build && node dist/main.js [https://host/path/file.fits]
 
 The URL is optional; it defaults to `NICMOSn4hk12010_mos.fits` (1.17 MB,
 five 270x263 NICMOS image extensions) from the NASA FITS Support Office's
-public sample tree at `fits.gsfc.nasa.gov/samples/`, which has served these
-files at stable URLs since 2004 and returns `Accept-Ranges: bytes`.
-Requires Node.js 22+ and network access.
+public sample tree at `fits.gsfc.nasa.gov/samples/`. Requires Node.js 22+
+and network access.
 
-The endpoint must support HTTP `Range`; `HttpRangeReader` falls back to a
-single full fetch only if the server explicitly refuses (`416` or no
-`Accept-Ranges` on the first probe).
+The endpoint should support HTTP `Range`. If the server answers the
+initial `bytes=0-0` probe with `200` (ignoring Range), `HttpRangeReader`
+reads the whole body once and serves later reads from memory.
