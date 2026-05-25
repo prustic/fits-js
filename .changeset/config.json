@@ -14,6 +14,7 @@
     "@fits-js/integration-tests",
     "@fits-js/example-node-read-file",
     "@fits-js/example-http-range",
-    "@fits-js/example-browser-input"
+    "@fits-js/example-browser-input",
+    "@fits-js/example-reference-viewer"
   ]
 }

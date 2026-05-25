@@ -1,0 +1,27 @@
+{
+  "name": "@fits-js/example-reference-viewer",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pick a FITS file in the browser and render the first 2D image to a canvas",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && vite build",
+    "dev": "vite",
+    "preview": "vite preview",
+    "clean": "git clean -xdf .cache .turbo dist *.tsbuildinfo node_modules",
+    "lint": "eslint"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "@fits-js/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@fits-js/eslint-config": "workspace:*",
+    "@fits-js/typescript-config": "workspace:*",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vite": "^8.0.14"
+  }
+}
