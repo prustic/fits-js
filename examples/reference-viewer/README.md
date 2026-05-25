@@ -20,3 +20,8 @@ primary or `IMAGE` extension. `pnpm build` emits a production bundle in
 This example decodes the full image into memory; that's deliberate for
 a viewer, but it's not how lazy access is meant to be used in production
 (see [`http-range`](../http-range/) for the lazy-cutout pattern).
+
+Pixel values are coerced to `Float64` for the percentile sort and the
+display normalization, which loses precision above ±2^53 for the
+`BigInt64Array`/`BigUint64Array` cases. The display path is 8-bit
+grayscale, so this loss never reaches the canvas.

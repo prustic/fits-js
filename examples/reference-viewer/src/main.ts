@@ -38,9 +38,6 @@ function labelFor(hdu: Hdu): string {
 }
 
 function robustRange(data: ImageArray): [number, number] {
-  // Number() truncates past +/-2^53 for BigInt64/BigUint64 typed arrays;
-  // 64-bit integer pixel values are rare in archive data and the display
-  // path is 8-bit anyway, so we accept the loss.
   const buf = new Float64Array(data.length);
   let n = 0;
   for (let i = 0; i < data.length; i++) {
