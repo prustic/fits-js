@@ -11,8 +11,8 @@ ranges those calls actually need.
 pnpm build && node dist/main.js [https://host/path/file.fits]
 ```
 
-The URL is optional; it defaults to `NICMOSn4hk12010_mos.fits` (1.17 MB,
-five 270x263 NICMOS image extensions) from the NASA FITS Support Office's
+The URL is optional; it defaults to `NICMOSn4hk12010_mos.fits` (five
+270x263 NICMOS image extensions) from the NASA FITS Support Office's
 public sample tree at `fits.gsfc.nasa.gov/samples/`. Requires Node.js 22+
 and network access.
 
