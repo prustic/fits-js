@@ -11,7 +11,7 @@ try {
 
   console.log(`${path}: ${hdus.length} HDU${hdus.length === 1 ? "" : "s"}`);
   for (const hdu of hdus) {
-    const name = hdu.header.getString("EXTNAME") ?? (hdu.type === "primary" ? "PRIMARY" : "");
+    const name = hdu.name ?? (hdu.type === "primary" ? "PRIMARY" : "");
     console.log(`  [${hdu.index}] ${hdu.type.padEnd(8)} ${name}`);
   }
 
