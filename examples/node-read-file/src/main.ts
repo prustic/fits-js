@@ -16,9 +16,9 @@ try {
   }
 
   const primary = hdus[0];
-  if (primary.type === "primary" && primary.header.getNumber("NAXIS") === 2) {
-    const n1 = primary.header.getNumber("NAXIS1") ?? 0;
-    const n2 = primary.header.getNumber("NAXIS2") ?? 0;
+  const n1 = primary.header.getNumber("NAXIS1") ?? 0;
+  const n2 = primary.header.getNumber("NAXIS2") ?? 0;
+  if (primary.type === "primary" && primary.header.getNumber("NAXIS") === 2 && n1 > 0 && n2 > 0) {
     const region = { start: [0, 0], shape: [Math.min(8, n1), Math.min(2, n2)] };
 
     const cut = await readImage(primary, reader, { region });
