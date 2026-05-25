@@ -131,7 +131,7 @@ importers:
         version: 5.9.3
       vite:
         specifier: ^8.0.14
-        version: 8.0.14(@types/node@25.8.0)
+        version: 8.0.14(@types/node@25.9.1)
 
   packages/fits-core:
     devDependencies:
