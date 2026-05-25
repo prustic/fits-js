@@ -12,7 +12,7 @@ try {
   console.log(`${path}: ${hdus.length} HDU${hdus.length === 1 ? "" : "s"}`);
   for (const hdu of hdus) {
     const name = hdu.header.getString("EXTNAME") ?? (hdu.type === "primary" ? "PRIMARY" : "");
-    console.log(`  [${hdu.index}] ${hdu.type.padEnd(7)} ${name}`);
+    console.log(`  [${hdu.index}] ${hdu.type.padEnd(8)} ${name}`);
   }
 
   const primary = hdus[0];
@@ -22,8 +22,9 @@ try {
     const region = { start: [0, 0], shape: [Math.min(8, n1), Math.min(2, n2)] };
 
     const cut = await readImage(primary, reader, { region });
+    const values = Array.from(cut.data as ArrayLike<number | bigint>);
     console.log(`\nprimary ${n1}x${n2}, ${cut.shape[0]}x${cut.shape[1]} cutout at (0,0):`);
-    console.log(`  ${(cut.data as Float32Array | Float64Array).join(", ")}`);
+    console.log(`  ${values.join(", ")}`);
   }
 } finally {
   await reader.close();
