@@ -56,18 +56,19 @@ const hi = sorted[Math.floor(n * 0.995)];
 const scale = 255 / (hi - lo);
 
 const canvas = document.getElementById("horsehead") as HTMLCanvasElement;
-canvas.width = w;
-canvas.height = h;
+canvas.width = h;
+canvas.height = w;
 const ctx = canvas.getContext("2d")!;
-const img = ctx.createImageData(w, h);
-for (let y = 0; y < h; y++) {
-  const srcY = h - 1 - y;
-  for (let x = 0; x < w; x++) {
-    const v = Number(data[srcY * w + x]);
+const img = ctx.createImageData(h, w);
+for (let cy = 0; cy < w; cy++) {
+  for (let cx = 0; cx < h; cx++) {
+    const i1 = w - 1 - cy;
+    const i2 = h - 1 - cx;
+    const v = Number(data[i2 * w + i1]);
     const norm = Number.isFinite(v) ? Math.max(0, Math.min(255, (v - lo) * scale)) : 0;
-    const i = (y * w + x) * 4;
-    img.data[i] = img.data[i + 1] = img.data[i + 2] = norm;
-    img.data[i + 3] = 255;
+    const k = (cy * h + cx) * 4;
+    img.data[k] = img.data[k + 1] = img.data[k + 2] = norm;
+    img.data[k + 3] = 255;
   }
 }
 ctx.putImageData(img, 0, 0);
@@ -75,8 +76,9 @@ ctx.putImageData(img, 0, 0);
 
 That is the entire pipeline. Fetch bytes, open them as a FITS file, ask for the
 primary HDU's image data, paint it. The percentile clip handles outlier pixels.
-The Y-flip handles the axis convention, since FITS pixel (0,0) is bottom-left
-while canvas (0,0) is top-left.
+The pixel mapping handles both the FITS axis convention (row 0 is the bottom of
+the image) and a 90-degree rotation that puts the Horsehead in its canonical
+upright orientation.
 
 The [Quickstart](/fits-js/quickstart/) covers `NodeFileReader`, `HttpRangeReader`,
 and a few cutout patterns.
