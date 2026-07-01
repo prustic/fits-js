@@ -1,41 +1,110 @@
 ---
 title: Roadmap
-description: What is shipped, what is next, and what is out of scope.
+description: Planned releases and what lands in each.
 ---
 
-## 0.1.0 (shipping)
+## Shipped
 
-The lazy random-access core. One parser running over four readers, with image
-HDU support end to end.
+Nothing shipped yet. 0.1.0 is in flight. See the
+[Changelog](/fits-js/changelog/) for release details once it lands.
 
-- Header parsing covers fixed and free-format cards, `CONTINUE` long
-  strings, `HIERARCH` long keywords, indexed access (`NAXISn`, `TFORMn`),
-  duplicate keyword handling, and lenient recovery.
-- HDU enumeration covers primary plus extensions, with recognition of
-  `IMAGE`, `BINTABLE`, and ASCII table extensions, and lookup by
-  `EXTNAME`/`EXTVER`.
-- Readers ship as `BytesReader` (in-memory), `BlobReader` (browser
-  `Blob`/`File`), `NodeFileReader` (`fs`-backed, behind
-  `@fits-js/core/node`), and `HttpRangeReader` (HTTP `Range`, with LRU
-  paging and `If-Range`).
-- Image data is decoded by `readImage`, with region cutouts, BITPIX
-  scaling (`BZERO`/`BSCALE`), the unsigned-integer convention, and
-  `BLANK` to `NaN`.
+## Planned
 
-## Next
+### 0.1.0 · Opens and previews FITS
 
-- BINTABLE and ASCII table decode, with column accessors.
-- Tile-compressed images (`RICE_1`, `GZIP_1`, `GZIP_2`, `HCOMPRESS_1`,
-  `PLIO_1`).
-- `.fits.gz` support via `DecompressionStream`.
-- Writer side: `openFitsForWrite`, primary + extension write, header
-  mutation.
+The lazy random-access core. One parser over four readers, image HDU
+support end to end.
 
-## Out of scope
+- **Header parsing**: fixed and free-format cards, `CONTINUE` long
+  strings, `HIERARCH` long keywords, indexed access (`NAXISn`,
+  `TFORMn`), duplicate keyword handling, lenient recovery.
+- **HDU enumeration**: primary and extensions, recognition of `IMAGE`,
+  `BINTABLE`, and ASCII table extensions. Lookup by `EXTNAME` and
+  `EXTVER`.
+- **Readers**: `BytesReader` (in-memory), `BlobReader` (browser
+  `Blob`/`File`), `NodeFileReader` behind `@fits-js/core/node` for
+  `fs`-backed access, `HttpRangeReader` with LRU paging and `If-Range`.
+- **Image data**: `readImage` with region cutouts, `BITPIX` scaling
+  (`BZERO`/`BSCALE`), unsigned-int convention, `BLANK` to `NaN`.
 
-- WCS coordinate transforms (a separate library job).
-- Random groups (detected and rejected).
-- Built-in image viewer or canvas rendering helpers. The library returns
-  decoded typed arrays. Rendering choices belong in user code or example
-  packages like
-  [`examples/reference-viewer`](https://github.com/prustic/fits-js/tree/main/examples/reference-viewer).
+### 0.2.0 · Catalogs as Arrow
+
+BINTABLE and ASCII table decode. Return columns as `arrow.Table` or
+`RecordBatch` stream so astronomy catalogs become first-class in the JS
+columnar ecosystem.
+
+- BINTABLE column decode covering `L X B I J K A E D C M`, repeat
+  counts, `TSCAL`/`TZERO`/`TNULL`, `TDIM`, and `P`/`Q` variable-length
+  arrays via the heap.
+- ASCII table decode covering fixed-width fields with `TFORM` and
+  `TBCOL`.
+- `@fits-js/arrow` package: FITS column to Arrow type mapping,
+  `RecordBatch` per read chunk, lazy column projection.
+
+### 0.3.0 · Compressed survey data
+
+Transparent decode of compressed-image extensions. A compressed
+MAST/ESO file reads exactly like an uncompressed one.
+
+- `Z*` compressed-image keyword set and tile geometry.
+- `RICE_1`, `GZIP_1`, `GZIP_2` decode.
+- Subtractive dither variants 1 and 2, byte-for-byte against `funpack`.
+
+### 0.4.0 · Sky coordinates
+
+Real pixel-to-sky and sky-to-pixel transforms.
+
+- Linear model (`CRPIX`, `CRVAL`, `CDELT`).
+- `CD` and `PC` matrix forms.
+- TAN, SIN, ARC, ZEA, AIT, CAR projections.
+- pixel↔sky round-trip verified against `astropy.wcs`.
+- `@fits-js/wcs` package.
+
+### 0.5.0 · Rendering primitives
+
+Pixel transforms to RGBA for canvas, without hand-rolling the astronomy
+stretches.
+
+- Linear, log, sqrt, asinh, power stretches.
+- Z-scale and percentile autoscaling.
+- Small baked colormap set (gray, viridis, magma, heat).
+- WCS grid and axis overlays as SVG paths.
+- `@fits-js/render` package. No UI components. Canvas wiring is the
+  consumer's job.
+
+### 0.6.0 · Writing FITS
+
+Construct and write primary, IMAGE, BINTABLE, and ASCII table HDUs with
+correct headers and checksums.
+
+- Write primary and IMAGE HDUs.
+- Write BINTABLE including the heap.
+- Write ASCII table.
+- Header construction and mutation API.
+- `CHECKSUM` and `DATASUM` generation.
+- Every read fixture round-trips and passes `fitsverify` clean.
+
+### 0.7.0 · Trustworthy on real data
+
+Integrity verification, an explicit strict-vs-lenient contract, and a
+proven-identical cross-runtime story.
+
+- `DATASUM` and `CHECKSUM` verification.
+- Structural conformance check at `fitsverify` level.
+- Strict vs lenient parse modes, default lenient with a `warnings`
+  channel.
+- Full CI matrix: Node 22/24, Bun, Deno, Workers, headless browser.
+
+### Ongoing · Comprehensive tail
+
+Specialist surfaces, sequenced by concrete consumer demand rather than
+by fixed release number.
+
+- `PLIO_1` and `HCOMPRESS_1` decode.
+- Compressed BINTABLE and compressed-image encode.
+- SIP polynomial distortion (HST/JWST drizzled products). First to pull
+  forward when demand arrives.
+- TPV/TNX distortion, spectral WCS, time WCS.
+- Uncommon projections (MOL, STG, COE).
+- DuckDB-wasm FITS table function.
+- Arrow Flight bridge.
