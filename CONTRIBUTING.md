@@ -2,7 +2,7 @@
 
 Thanks for considering a contribution. fits-js is a TypeScript implementation of the FITS file format for JavaScript runtimes. PRs that improve spec fidelity, fix bugs, fill in capability gaps, or sharpen the docs are all welcome.
 
-The project is in its planning phase: the repository currently holds tooling and scaffolding, not an implementation. Issues that discuss scope, real-world FITS files that break assumptions, and use cases are useful right now even before there is code to patch.
+For development setup (clone, install, build, run tests), see the [Contributing](https://prustic.github.io/fits-js/contributing/) page on the docs site. Below is the policy and process side: what to expect when you open an issue or send a PR.
 
 ## Ways to contribute
 
@@ -22,10 +22,10 @@ Security vulnerabilities don't go in public issues. See [SECURITY.md](SECURITY.m
 
 1. Fork and branch from `main`.
 2. Make your changes with tests. Bug fixes need a regression test; new capabilities need decode tests, cross-checked against astropy or CFITSIO on the same input where behavior is non-trivial.
-3. Run the full build, lint, and test pipeline before pushing; that's what CI runs.
+3. Run the full build, lint, and test pipeline before pushing. That's what CI runs.
 4. Open the PR against `main` with a description that explains what changed and why.
 
-Keep PRs focused. One concern per PR; split unrelated changes.
+Keep PRs focused. One concern per PR. Split unrelated changes.
 
 ## Commit messages
 
