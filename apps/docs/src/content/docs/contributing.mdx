@@ -1,44 +1,79 @@
 ---
 title: Contributing
-description: How fits-js development works and what review expects.
+description: How to build, test, and contribute to fits-js.
 ---
 
-fits-js development happens on
-[github.com/prustic/fits-js](https://github.com/prustic/fits-js). All work
-goes through pull requests against `main`.
+For policy and process, see [CONTRIBUTING.md](https://github.com/prustic/fits-js/blob/main/CONTRIBUTING.md).
 
-## Local setup
+## Repository layout
 
-```sh
+A pnpm + Turborepo monorepo:
+
+```
+packages/
+  fits-core/         zero-dependency parser, I/O readers, and image decoder
+apps/
+  docs/              this site (Astro + Starlight + TypeDoc)
+examples/
+  node-read-file/    open a local file, enumerate HDUs, read a cutout
+  http-range/        HttpRangeReader against a public archive URL
+  browser-input/     BlobReader from an <input type="file"> in the browser
+  reference-viewer/  render a FITS image to a canvas
+tests/
+  integration/       dockerized real-archive integration suite
+```
+
+Scripts are defined in `package.json` at the repo root and in each workspace. Turbo orchestrates them across the monorepo. `pnpm --filter <package> <script>` invokes a script in a specific workspace.
+
+## Setup
+
+Requires Node 22 or later and pnpm 10 or later.
+
+```bash
 git clone https://github.com/prustic/fits-js.git
 cd fits-js
 pnpm install
-pnpm blt
 ```
 
-`pnpm blt` builds, lints, and tests every workspace package. Integration
-tests live in `tests/integration/` and need Docker. Run them with `pnpm
-test:integration`.
+## Testing and linting
+
+Unit tests live alongside source as `*.test.ts` files. They run against committed real-archive fixtures under `packages/fits-core/test-fixtures/` (small enough to commit, byte-identical to the archive originals) and hand-authored synthetic bytes for the scaling and unsigned-int paths that have no small real fixture.
+
+Integration tests live in `tests/integration/` (`@fits-js/integration-tests`). The `test:integration` script brings up an nginx server in Docker serving the committed fixtures over native HTTP `Range`, runs against it, and tears it down:
+
+```bash
+pnpm test:integration
+```
+
+Every parser change ships with a unit test. Real-bytes coverage is the oracle where a small real file exists. Where it doesn't, synthetic bytes are hand-authored and cross-checked against `astropy.io.fits` as a throwaway differential oracle. The astropy output is never committed.
+
+Linting and formatting use ESLint and Prettier with shared config in `tooling/eslint/` and `tooling/prettier/`. Both run in CI on every PR alongside the build and test steps.
 
 ## Style
 
 - TypeScript with `strict: true`.
 - No regex on parser input or untrusted bytes. Use explicit bounded scans.
 - Public surface gets TSDoc. Internals stay terse.
-- House style follows the shared
-  [code-style guide](https://github.com/prustic/oss-instructions-n-docs/blob/main/code-style.md).
+- House style follows the shared [code-style guide](https://github.com/prustic/oss-instructions-n-docs/blob/main/code-style.md).
 
-## Tests
+## Filing a bug
 
-Every parser change ships with a unit test against committed fixtures.
-Real-archive fixtures live in `packages/fits-core/test-fixtures/`, and the
-integration suite cross-checks `HttpRangeReader` + `openFits` + `readImage`
-against the same bytes over a dockerized HTTP server with native `Range`
-support. The oracle for new tests is the bytes themselves, not committed
-"expected" output.
+Ideally, include:
 
-## Reporting bugs
+1. `@fits-js/core` version from `package.json`.
+2. Node or browser version.
+3. Minimal reproduction: a small FITS file, or a public archive URL that reproduces.
+4. Full error: message, error class name, and any structured properties (`cardIndex`, `hduIndex`, `url`, `status`, `offset`).
+5. The `warnings` array returned by `openFits(reader)` if the file is malformed.
 
-Open an issue with a minimal FITS file (or a public archive URL) that
-reproduces. If the file is private, the offending headers and a description
-of the structure are usually enough.
+If the file is private, the offending headers as text and a description of the structure are usually enough.
+
+The [Error handling](/fits-js/guides/error-handling/) guide covers the error hierarchy and what each subclass carries.
+
+## Reporting security issues
+
+Do not open a public issue for a security vulnerability. See [SECURITY.md](https://github.com/prustic/fits-js/blob/main/SECURITY.md) in the repo for the disclosure policy.
+
+## License
+
+By contributing, you agree that your contributions are licensed under [Apache-2.0](https://github.com/prustic/fits-js/blob/main/LICENSE).
