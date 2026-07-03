@@ -3,14 +3,11 @@ title: Reading a FITS file
 description: Open a FITS file from disk, enumerate HDUs, and read pixel data.
 ---
 
-The Node path uses `NodeFileReader` from the `@fits-js/core/node` subpath.
-The subpath exists so browser bundlers do not have to walk past
-`node:fs/promises` when tree-shaking. Everything else lives at
-`@fits-js/core`.
+The Node path uses `NodeFileReader`. All the readers, the parser, and the
+image decoder come from the same entry, `@fits-js/core`.
 
 ```ts
-import { openFits, readImage } from "@fits-js/core";
-import { NodeFileReader } from "@fits-js/core/node";
+import { NodeFileReader, openFits, readImage } from "@fits-js/core";
 
 const reader = await NodeFileReader.open("data/image.fits");
 try {

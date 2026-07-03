@@ -27,10 +27,7 @@ export default defineConfig({
       },
       plugins: [
         starlightTypeDoc({
-          entryPoints: [
-            "../../packages/fits-core/src/index.ts",
-            "../../packages/fits-core/src/node.ts",
-          ],
+          entryPoints: ["../../packages/fits-core/src/index.ts"],
           tsconfig: "../../packages/fits-core/tsconfig.json",
           output: "api",
           sidebar: {

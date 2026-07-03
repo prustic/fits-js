@@ -21,7 +21,8 @@ import {
 
 - `FitsError` is the base class. Every other library error extends it.
 - `FitsHeaderError` covers malformed cards (bad keyword grammar,
-  unparseable values, unterminated strings). Carries the card offset.
+  unparseable values, unterminated strings). Carries `cardIndex`,
+  `keyword`, and `rawCard` for the offending card.
 - `FitsStructureError` covers HDUs whose structural keywords are out of
   domain or inconsistent (negative `NAXIS`, mismatched `TFIELDS`, random
   groups). Carries `hduIndex`.
@@ -42,7 +43,7 @@ try {
   // ...
 } catch (err) {
   if (err instanceof FitsHeaderError) {
-    console.error(`malformed card at offset ${err.cardOffset}: ${err.message}`);
+    console.error(`malformed card ${err.cardIndex} (${err.keyword}): ${err.message}`);
   } else if (err instanceof FitsIoError) {
     console.error(`I/O for ${err.url} (status ${err.status}): ${err.message}`);
   } else {

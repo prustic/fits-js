@@ -14,6 +14,7 @@ You need:
 
 ## Install
 
+{/* prettier-ignore */}
 <Tabs syncKey="pkg">
   <TabItem label="npm">
     ```sh
@@ -37,15 +38,13 @@ You need:
   </TabItem>
 </Tabs>
 
-The main entry exports the parser, the decoder, and the browser-safe readers.
-The Node filesystem reader lives at the `/node` subpath so browser bundlers
-don't have to walk past `node:fs/promises` to tree-shake it.
+Everything comes from the same entry. Pick the reader that fits the byte
+source.
 
 ## Open a local file
 
 ```ts
-import { openFits, readImage } from "@fits-js/core";
-import { NodeFileReader } from "@fits-js/core/node";
+import { NodeFileReader, openFits, readImage } from "@fits-js/core";
 
 const reader = await NodeFileReader.open("data/image.fits");
 try {
