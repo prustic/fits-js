@@ -261,6 +261,74 @@ test("HttpRangeReader: byte-for-byte vs BytesReader on a real archive file", asy
   assert.deepEqual(await r.read(whole.length - 100, 500), await mem.read(whole.length - 100, 500));
 });
 
+/** A 206 whose body stream dies mid-transfer (early end, connection reset). */
+function terminatedBody(status: number, headers?: Record<string, string>, reason?: unknown) {
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array(8));
+      controller.error(reason ?? new TypeError("terminated"));
+    },
+  });
+  return new Response(stream, { status, headers });
+}
+
+test("HttpRangeReader: a body failure on the probe is wrapped as FitsIoError", async () => {
+  const fetch = (() =>
+    Promise.resolve(
+      terminatedBody(206, { "Content-Range": "bytes 0-0/4096" }),
+    )) as unknown as typeof globalThis.fetch;
+  const r = new HttpRangeReader("https://x/f.fits", { fetch });
+  await assert.rejects(
+    () => r.read(0, 10),
+    (e: unknown) =>
+      e instanceof FitsIoError &&
+      e.url === "https://x/f.fits" &&
+      e.status === 206 &&
+      e.cause instanceof TypeError,
+  );
+});
+
+test("HttpRangeReader: a body failure mid-range is wrapped as FitsIoError", async () => {
+  const fetch = ((_u: string | URL, init?: RequestInit) => {
+    const range = (init?.headers as Record<string, string>).Range;
+    if (range === "bytes=0-0") {
+      return Promise.resolve(
+        new Response(data.slice(0, 1), {
+          status: 206,
+          headers: { "Content-Range": `bytes 0-0/${data.length}` },
+        }),
+      );
+    }
+    return Promise.resolve(
+      terminatedBody(206, { "Content-Range": `bytes 0-1023/${data.length}` }),
+    );
+  }) as unknown as typeof globalThis.fetch;
+  const r = new HttpRangeReader("https://x/f.fits", { fetch });
+  await assert.rejects(
+    () => r.read(0, 10),
+    (e: unknown) => e instanceof FitsIoError && e.status === 206 && e.cause instanceof TypeError,
+  );
+});
+
+test("HttpRangeReader: an abort during the body read surfaces the abort reason", async () => {
+  const ac = new AbortController();
+  const fetch = (() => {
+    ac.abort();
+    return Promise.resolve(
+      terminatedBody(
+        206,
+        { "Content-Range": "bytes 0-0/4096" },
+        new DOMException("aborted", "AbortError"),
+      ),
+    );
+  }) as unknown as typeof globalThis.fetch;
+  const r = new HttpRangeReader("https://x/f.fits", { fetch, signal: ac.signal });
+  await assert.rejects(
+    () => r.read(0, 10),
+    (e: unknown) => e instanceof Error && !(e instanceof FitsIoError) && e.name === "AbortError",
+  );
+});
+
 test("HttpRangeReader: a network failure is wrapped as FitsIoError", async () => {
   const fetch = (() =>
     Promise.reject(new TypeError("ECONNREFUSED"))) as unknown as typeof globalThis.fetch;
