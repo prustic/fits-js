@@ -37,7 +37,7 @@ pnpm install
 
 ## Testing and linting
 
-Unit tests live alongside source as `*.test.ts` files. They run against committed real-archive fixtures under `packages/fits-core/test-fixtures/` (small enough to commit, byte-identical to the archive originals) and hand-authored synthetic bytes for the scaling and unsigned-int paths that have no small real fixture.
+Unit tests live alongside source as `*.test.ts` files. They run against committed real-archive fixtures under `packages/fits-core/test-fixtures/` (small enough to commit, byte-identical to the archive originals) and hand-authored synthetic bytes for the paths that have no small real fixture.
 
 Integration tests live in `tests/integration/` (`@fits-js/integration-tests`). The `test:integration` script brings up an nginx server in Docker serving the committed fixtures over native HTTP `Range`, runs against it, and tears it down:
 
@@ -48,13 +48,6 @@ pnpm test:integration
 Every parser change ships with a unit test. Real-bytes coverage is the oracle where a small real file exists. Where it doesn't, synthetic bytes are hand-authored and cross-checked against `astropy.io.fits` as a throwaway differential oracle. The astropy output is never committed.
 
 Linting and formatting use ESLint and Prettier with shared config in `tooling/eslint/` and `tooling/prettier/`. Both run in CI on every PR alongside the build and test steps.
-
-## Style
-
-- TypeScript with `strict: true`.
-- No regex on parser input or untrusted bytes. Use explicit bounded scans.
-- Public surface gets TSDoc. Internals stay terse.
-- House style follows the shared [code-style guide](https://github.com/prustic/oss-instructions-n-docs/blob/main/code-style.md).
 
 ## Filing a bug
 

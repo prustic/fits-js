@@ -65,11 +65,9 @@ for (let cy = 0; cy < w; cy++) {
 ctx.putImageData(img, 0, 0);
 ```
 
-That is the entire pipeline. Fetch bytes, open them as a FITS file, ask for the
-primary HDU's image data, paint it. The percentile clip handles outlier pixels.
-The pixel mapping handles both the FITS axis convention (row 0 is the bottom of
-the image) and a 90-degree rotation that puts the Horsehead in its canonical
-upright orientation.
+The percentile clip drops outlier pixels. The pixel mapping flips Y (FITS stores
+row 0 at the bottom, the canvas paints top-down) and rotates 90 degrees to match
+the orientation the Horsehead is usually shown in.
 
 The [Quickstart](/fits-js/quickstart/) covers `NodeFileReader`, `HttpRangeReader`,
 and a few cutout patterns.
