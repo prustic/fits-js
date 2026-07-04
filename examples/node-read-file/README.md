@@ -10,6 +10,6 @@ Opens a FITS file with `NodeFileReader`, enumerates HDUs lazily with
 pnpm build && node dist/main.js [path/to/file.fits]
 ```
 
-The path is optional; it defaults to `fixtures/sample.fits`, an HST/FOS
+The path is optional and defaults to `fixtures/sample.fits`, an HST/FOS
 multi-extension file from the public MAST archive checked into the example.
 Requires Node.js 22+.

@@ -1,0 +1,58 @@
+---
+title: Working with image data
+description: readImage, region cutouts, BITPIX scaling, and BLANK handling.
+---
+
+`readImage` decodes a 2D or higher image HDU into a typed array. It
+applies `BZERO`/`BSCALE` scaling and the FITS unsigned-integer convention
+by default, and exposes the raw on-disk array on request.
+
+```ts
+const { data, shape, bitpix, bscale, bzero } = await readImage(hdu, reader);
+```
+
+## Cutouts
+
+```ts
+const region = { start: [100, 0], shape: [16, 2] };
+const { data, shape } = await readImage(hdu, reader, { region });
+```
+
+`region.start` and `region.shape` carry one entry per axis, in FITS order
+(`NAXIS1` first, fastest-varying). The reader fetches only the bytes
+covering the region. On `HttpRangeReader` that drops to a handful of HTTP
+ranges.
+
+## BITPIX and the returned array
+
+The `data` field type follows `BITPIX` and the scaling applied.
+
+| BITPIX | Scaled (`BZERO`/`BSCALE`) | Unsigned-int convention         | No scaling      |
+| -----: | ------------------------- | ------------------------------- | --------------- |
+|      8 | `Float32Array`            | `Int8Array` (`BZERO=-2^7`)      | `Uint8Array`    |
+|     16 | `Float32Array`            | `Uint16Array` (`BZERO=2^15`)    | `Int16Array`    |
+|     32 | `Float64Array`            | `Uint32Array` (`BZERO=2^31`)    | `Int32Array`    |
+|     64 | `Float64Array`            | `BigUint64Array` (`BZERO=2^63`) | `BigInt64Array` |
+|    -32 | `Float32Array`            | n/a                             | `Float32Array`  |
+|    -64 | `Float64Array`            | n/a                             | `Float64Array`  |
+
+The scaled column applies whenever `BSCALE` differs from 1 or `BZERO`
+differs from 0 in a way other than the unsigned-int convention. `BLANK`
+pixels become `NaN` in that case.
+
+The no-scaling column returns the on-disk array as-is, preserving integer
+exactness. If `BLANK` is declared, `image.blank` carries the sentinel
+value so the caller can mask it. This is a deliberate deviation from
+astropy, which widens an integer image to `float32` with `NaN` at the
+blanks. fits-js keeps integers exact.
+
+## Raw mode
+
+```ts
+const { data, blank } = await readImage(hdu, reader, { raw: true });
+```
+
+`raw: true` skips `BZERO`/`BSCALE` and the unsigned-int convention. The
+native typed array for `BITPIX` comes back. Useful for re-implementing
+scaling differently, or for inspecting bytes byte-exact against another
+tool.

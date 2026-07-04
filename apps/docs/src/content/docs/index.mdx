@@ -1,0 +1,110 @@
+---
+title: fits-js
+description: A TypeScript FITS parser. Lazy random-access reads in Node and the browser.
+head:
+  - tag: script
+    attrs:
+      type: application/ld+json
+    content: |
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareSourceCode",
+        "name": "fits-js",
+        "description": "A TypeScript FITS parser with lazy random-access reads. Runs in Node, browsers, Bun, and Deno.",
+        "url": "https://prustic.github.io/fits-js/",
+        "codeRepository": "https://github.com/prustic/fits-js",
+        "programmingLanguage": "TypeScript",
+        "license": "https://www.apache.org/licenses/LICENSE-2.0",
+        "keywords": "FITS, astronomy, TypeScript, parser, HTTP Range, browser"
+      }
+---
+
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+import HorseheadHero from "../../components/HorseheadHero.astro";
+
+<HorseheadHero />
+
+fits-js parses [FITS](https://fits.gsfc.nasa.gov/) files in TypeScript. It runs
+in Node, browsers, Bun, and Deno from a single browser-safe core. Opening a
+file reads only the header blocks, and a small cutout from a 4 GB cube reads
+only the bytes that cutout covers.
+
+## Install
+
+{/* prettier-ignore */}
+<Tabs syncKey="pkg">
+  <TabItem label="npm">
+    ```sh
+    npm install @fits-js/core
+    ```
+  </TabItem>
+  <TabItem label="pnpm">
+    ```sh
+    pnpm add @fits-js/core
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    ```sh
+    yarn add @fits-js/core
+    ```
+  </TabItem>
+  <TabItem label="bun">
+    ```sh
+    bun add @fits-js/core
+    ```
+  </TabItem>
+</Tabs>
+
+Zero runtime dependencies. Node 22 or later. In the browser, any environment
+with `fetch`, `Blob`, and `TypedArray` works.
+
+## The code that renders the image above
+
+```ts
+import { BytesReader, openFits, readImage } from "@fits-js/core";
+
+const bytes = new Uint8Array(await (await fetch("/horsehead.fits")).arrayBuffer());
+const reader = new BytesReader(bytes);
+const { hdus } = await openFits(reader);
+const primary = hdus[0];
+
+const { data } = await readImage(primary, reader);
+const w = primary.header.getNumber("NAXIS1")!;
+const h = primary.header.getNumber("NAXIS2")!;
+
+const finite = new Float64Array(data.length);
+let n = 0;
+for (let i = 0; i < data.length; i++) {
+  const v = Number(data[i]);
+  if (Number.isFinite(v)) finite[n++] = v;
+}
+const sorted = finite.subarray(0, n).sort();
+const lo = sorted[Math.floor(n * 0.005)];
+const hi = sorted[Math.floor(n * 0.995)];
+const scale = 255 / (hi - lo);
+
+const canvas = document.getElementById("horsehead") as HTMLCanvasElement;
+canvas.width = h;
+canvas.height = w;
+const ctx = canvas.getContext("2d")!;
+const img = ctx.createImageData(h, w);
+for (let cy = 0; cy < w; cy++) {
+  for (let cx = 0; cx < h; cx++) {
+    const i1 = w - 1 - cy;
+    const i2 = h - 1 - cx;
+    const v = Number(data[i2 * w + i1]);
+    const norm = Number.isFinite(v) ? Math.max(0, Math.min(255, (v - lo) * scale)) : 0;
+    const k = (cy * h + cx) * 4;
+    img.data[k] = img.data[k + 1] = img.data[k + 2] = norm;
+    img.data[k + 3] = 255;
+  }
+}
+ctx.putImageData(img, 0, 0);
+```
+
+The percentile clip drops outlier pixels. The pixel mapping flips Y (FITS stores
+row 0 at the bottom, the canvas paints top-down) and rotates 90 degrees to match
+the orientation the Horsehead is usually shown in.
+
+The [Quickstart](/fits-js/quickstart/) covers `NodeFileReader`, `HttpRangeReader`,
+and a few cutout patterns.

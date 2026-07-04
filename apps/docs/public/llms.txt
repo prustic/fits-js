@@ -1,0 +1,33 @@
+# fits-js
+
+> A TypeScript FITS parser with lazy random-access reads. Runs in Node, browsers, Bun, and Deno from a single browser-safe core with zero runtime dependencies.
+
+Application code installs `@fits-js/core`. Opening a file reads only header blocks, and a region cutout reads only the bytes that region covers, including over HTTP `Range`.
+
+## Getting started
+
+- [Quickstart](https://prustic.github.io/fits-js/quickstart/): install, open a file from disk, over HTTP, or from a browser input, read a cutout
+- [Overview](https://prustic.github.io/fits-js/): install, the code behind the landing-page render
+
+## Guides
+
+- [Reading a FITS file](https://prustic.github.io/fits-js/guides/reading-a-file/): NodeFileReader, cutouts, choosing an extension
+- [Reading over HTTP](https://prustic.github.io/fits-js/guides/reading-over-http/): HttpRangeReader, caching, range fallback, options
+- [Working with HDUs](https://prustic.github.io/fits-js/guides/working-with-hdus/): enumeration, HDU types, lookup by EXTNAME
+- [Working with image data](https://prustic.github.io/fits-js/guides/working-with-image-data/): readImage, BITPIX scaling, BLANK handling, raw mode
+- [Working with headers](https://prustic.github.io/fits-js/guides/working-with-headers/): FitsHeader accessors, indexed keywords, CONTINUE, HIERARCH
+- [Error handling](https://prustic.github.io/fits-js/guides/error-handling/): FitsError hierarchy, warnings channel, aborting
+- [API reference](https://prustic.github.io/fits-js/api/): auto-generated from TSDoc
+
+## Project
+
+- [Architecture](https://prustic.github.io/fits-js/architecture/): the RandomAccessReader abstraction and the lazy read path
+- [Examples](https://prustic.github.io/fits-js/examples/): runnable apps in the repo
+- [Roadmap](https://prustic.github.io/fits-js/roadmap/): shipped releases and what lands next
+- [Changelog](https://prustic.github.io/fits-js/changelog/): per-release notes
+- [Contributing](https://prustic.github.io/fits-js/contributing/): repo layout, setup, testing
+
+## Source
+
+- Repository: https://github.com/prustic/fits-js
+- npm: https://www.npmjs.com/package/@fits-js/core

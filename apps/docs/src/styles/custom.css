@@ -1,0 +1,6 @@
+/* fits-js customisations for Starlight */
+
+:root {
+  --sl-font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --sl-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}

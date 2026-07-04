@@ -12,6 +12,6 @@ pnpm dev
 ```
 
 Vite serves at `http://localhost:5173`. Click the file picker and choose
-any FITS file from disk; the page lists HDUs and prints the cutout
+any FITS file from disk. The page lists HDUs and prints the cutout
 values. `pnpm build` emits a production bundle in `dist/`. Requires
 Node.js 22+ for the dev server.

@@ -1,0 +1,56 @@
+---
+title: Reading a FITS file
+description: Open a FITS file from disk, enumerate HDUs, and read pixel data.
+---
+
+The Node path uses `NodeFileReader`. All the readers, the parser, and the
+image decoder come from the same entry, `@fits-js/core`.
+
+```ts
+import { NodeFileReader, openFits, readImage } from "@fits-js/core";
+
+const reader = await NodeFileReader.open("data/image.fits");
+try {
+  const { hdus, warnings } = await openFits(reader);
+  for (const w of warnings) console.warn(w);
+
+  const primary = hdus[0];
+  const { data, shape, bitpix } = await readImage(primary, reader);
+  console.log(`${shape.join("x")} BITPIX=${bitpix}`, data.length);
+} finally {
+  await reader.close();
+}
+```
+
+`NodeFileReader.open` accepts a string path or a `file:` URL. The handle
+stays open until `close()` runs, so wrap a `try/finally` around any work
+that throws.
+
+## Reading a small cutout
+
+`readImage` accepts an optional `region` in FITS axis order. The reader
+pulls only the bytes that cutout covers.
+
+```ts
+const region = { start: [100, 200], shape: [16, 16] };
+const { data, shape } = await readImage(primary, reader, { region });
+// data.length === 16 * 16, shape === [16, 16]
+```
+
+`region.start` and `region.shape` have one entry per axis. `NAXIS1` first,
+so on a 2D image `start[0]` is the X origin and `start[1]` is the Y
+origin.
+
+## Choosing an extension
+
+The HDU at `hdus[0]` is the primary HDU. Extensions follow in file order.
+`findHdu` looks them up by `EXTNAME` (and optionally `EXTVER`).
+
+```ts
+import { findHdu } from "@fits-js/core";
+
+const sci = findHdu(hdus, "SCI");
+if (sci?.type === "image") {
+  const { data } = await readImage(sci, reader);
+}
+```

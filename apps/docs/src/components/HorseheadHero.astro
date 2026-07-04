@@ -1,0 +1,94 @@
+<figure class="horsehead-hero">
+  <canvas id="horsehead-canvas"></canvas>
+  <figcaption>
+    Horsehead Nebula (Barnard 33), rendered in your browser from a 1.6 MB FITS
+    file using the same code shown below. The file comes from
+    <a href="https://github.com/astropy/astropy-data/tree/gh-pages/tutorials/FITS-images"
+      >astropy's FITS-images tutorial data</a
+    > (BSD-licensed).
+  </figcaption>
+</figure>
+
+<script>
+  import { BytesReader, openFits, readImage } from "@fits-js/core";
+
+  const FITS_URL = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/horsehead.fits`;
+
+  async function render(): Promise<void> {
+    const canvas = document.getElementById("horsehead-canvas");
+    if (!(canvas instanceof HTMLCanvasElement)) {
+      return;
+    }
+
+    const response = await fetch(FITS_URL);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+
+    const reader = new BytesReader(bytes);
+    const { hdus } = await openFits(reader);
+    const primary = hdus[0];
+    const w = primary.header.getNumber("NAXIS1") ?? 0;
+    const h = primary.header.getNumber("NAXIS2") ?? 0;
+    if (w === 0 || h === 0) {
+      return;
+    }
+
+    const { data } = await readImage(primary, reader);
+    const finite = new Float64Array(data.length);
+    let n = 0;
+    for (let i = 0; i < data.length; i++) {
+      const v = Number(data[i]);
+      if (Number.isFinite(v)) {
+        finite[n++] = v;
+      }
+    }
+    const sorted = finite.subarray(0, n).sort();
+    const lo = sorted[Math.floor(n * 0.005)];
+    const hi = sorted[Math.floor(n * 0.995)];
+    const scale = 255 / (hi - lo || 1);
+
+    canvas.width = h;
+    canvas.height = w;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return;
+    }
+    const img = ctx.createImageData(h, w);
+    for (let cy = 0; cy < w; cy++) {
+      for (let cx = 0; cx < h; cx++) {
+        const i1 = w - 1 - cy;
+        const i2 = h - 1 - cx;
+        const v = Number(data[i2 * w + i1]);
+        const norm = Number.isFinite(v) ? Math.max(0, Math.min(255, (v - lo) * scale)) : 0;
+        const k = (cy * h + cx) * 4;
+        img.data[k] = norm;
+        img.data[k + 1] = norm;
+        img.data[k + 2] = norm;
+        img.data[k + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+
+  void render();
+</script>
+
+<style>
+  .horsehead-hero {
+    margin: 0;
+    padding: 0;
+  }
+  .horsehead-hero canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-width: 100%;
+    image-rendering: pixelated;
+    background: #000;
+    border-radius: 0.25rem;
+  }
+  .horsehead-hero figcaption {
+    margin-top: 0.5rem;
+    font-size: 0.875rem;
+    color: var(--sl-color-gray-3);
+  }
+</style>

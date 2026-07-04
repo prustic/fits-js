@@ -1,0 +1,53 @@
+---
+title: Working with HDUs
+description: HDU enumeration, extensions, and lookup by name.
+---
+
+`openFits` returns a `ReadHdusResult` with a `readonly Hdu[]` and a list of
+parse warnings. Each HDU exposes its `header`, `type`, `dataOffset`, and
+the byte length of its data unit. The data unit itself is fetched on
+demand.
+
+```ts
+const { hdus, warnings } = await openFits(reader);
+
+for (const hdu of hdus) {
+  console.log(
+    hdu.index,
+    hdu.type,
+    hdu.name ?? (hdu.type === "primary" ? "PRIMARY" : ""),
+    `NAXIS=${hdu.header.getNumber("NAXIS")}`,
+  );
+}
+```
+
+## HDU types
+
+`hdu.type` is one of `"primary" | "image" | "bintable" | "table" |
+"unknown"`. Image data can live in either a 2D `"primary"` HDU or a 2D
+`"image"` extension. That is a FITS-level distinction, not a library
+artifact. The two cases share `readImage`.
+
+## Lookup by `EXTNAME`
+
+```ts
+import { findHdu } from "@fits-js/core";
+
+const sci = findHdu(hdus, "SCI");
+const sciV2 = findHdu(hdus, "SCI", 2); // EXTNAME=SCI, EXTVER=2
+```
+
+`findHdu` returns `undefined` when no match is found. The `EXTNAME` match
+is case-insensitive. The `EXTVER` match is exact.
+
+## `dataSizeKnown`
+
+`hdu.dataSizeKnown` is `true` when the declared data unit length is
+internally consistent. It is `false` when a structural keyword was missing
+or out of domain, or when the source was truncated. Reading bytes from the
+range `hdu.dataOffset .. hdu.dataOffset + hdu.dataByteLength` is only safe
+when this flag is `true`.
+
+`openFits` and `readHdus` report inconsistencies as warnings rather than
+throwing, because recovery is sometimes useful. Pass `{ strict: true }` to
+fail instead.

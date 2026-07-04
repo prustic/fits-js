@@ -1,0 +1,132 @@
+---
+title: Roadmap
+description: Planned releases and what lands in each.
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+<Mermaid
+  code={`
+timeline TD
+  0.1.0 : Core read path
+        : Header parsing, HDU enumeration
+        : Four readers, image data with cutouts
+  0.2.0 : Tables and Arrow
+        : BINTABLE and ASCII table decode
+        : @fits-js/arrow package
+  0.3.0 : Tile compression
+        : RICE_1, GZIP_1, GZIP_2
+        : Subtractive dither
+  0.4.0 : WCS transforms
+        : Linear WCS + six projections
+        : @fits-js/wcs package
+  0.5.0 : Render primitives
+        : Stretches, z-scale, colormaps
+        : @fits-js/render package
+  0.6.0 : Write path
+        : Write primary, IMAGE, BINTABLE
+        : CHECKSUM/DATASUM
+  0.7.0 : Verification and cross-runtime CI
+        : Verify checksums
+        : Strict vs lenient parse
+        : Full cross-runtime CI
+`}
+/>
+
+## Shipped
+
+Nothing shipped yet. 0.1.0 is in flight. See the
+[Changelog](/fits-js/changelog/) for release details once it lands.
+
+## Planned
+
+### 0.1.0 · Core read path
+
+The lazy random-access core. One parser over four readers, image HDU
+support end to end.
+
+- **Header parsing**: fixed and free-format cards, `CONTINUE` long
+  strings, `HIERARCH` long keywords, indexed access (`NAXISn`,
+  `TFORMn`), duplicate keyword handling, lenient recovery.
+- **HDU enumeration**: primary and extensions, recognition of `IMAGE`,
+  `BINTABLE`, and ASCII table extensions. Lookup by `EXTNAME` and
+  `EXTVER`.
+- **Readers**: `BytesReader` (in-memory), `BlobReader` (browser
+  `Blob`/`File`), `NodeFileReader` for `fs`-backed access, `HttpRangeReader`
+  with LRU paging and `If-Range`.
+- **Image data**: `readImage` with region cutouts, `BITPIX` scaling
+  (`BZERO`/`BSCALE`), unsigned-int convention, `BLANK` to `NaN`.
+
+### 0.2.0 · Tables and Arrow
+
+BINTABLE and ASCII table decode. Return columns as `arrow.Table` or
+`RecordBatch` stream so astronomy catalogs become first-class in the JS
+columnar ecosystem.
+
+- BINTABLE column decode covering `L X B I J K A E D C M`, repeat
+  counts, `TSCAL`/`TZERO`/`TNULL`, `TDIM`, and `P`/`Q` variable-length
+  arrays via the heap.
+- ASCII table decode covering fixed-width fields with `TFORM` and
+  `TBCOL`.
+- `@fits-js/arrow` package: FITS column to Arrow type mapping,
+  `RecordBatch` per read chunk, lazy column projection.
+
+### 0.3.0 · Tile compression
+
+Transparent decode of compressed-image extensions. A compressed
+MAST/ESO file reads exactly like an uncompressed one.
+
+- `Z*` compressed-image keyword set and tile geometry.
+- `RICE_1`, `GZIP_1`, `GZIP_2` decode.
+- Subtractive dither variants 1 and 2, byte-for-byte against `funpack`.
+
+### 0.4.0 · WCS transforms
+
+Real pixel-to-sky and sky-to-pixel transforms.
+
+- Linear model (`CRPIX`, `CRVAL`, `CDELT`).
+- `CD` and `PC` matrix forms.
+- TAN, SIN, ARC, ZEA, AIT, CAR projections.
+- pixel↔sky round-trip verified against `astropy.wcs`.
+- `@fits-js/wcs` package.
+
+### 0.5.0 · Render primitives
+
+Pixel transforms to RGBA for canvas, without hand-rolling the astronomy
+stretches.
+
+- Linear, log, sqrt, asinh, power stretches.
+- Z-scale and percentile autoscaling.
+- Small baked colormap set (gray, viridis, magma, heat).
+- WCS grid and axis overlays as SVG paths.
+- `@fits-js/render` package. No UI components. Canvas wiring is the
+  consumer's job.
+
+### 0.6.0 · Write path
+
+Construct and write primary, IMAGE, BINTABLE, and ASCII table HDUs with
+correct headers and checksums.
+
+- Write primary and IMAGE HDUs.
+- Write BINTABLE including the heap.
+- Write ASCII table.
+- Header construction and mutation API.
+- `CHECKSUM` and `DATASUM` generation.
+- Every read fixture round-trips and passes `fitsverify` clean.
+
+### 0.7.0 · Verification and cross-runtime CI
+
+Integrity verification, an explicit strict-vs-lenient contract, and a
+proven-identical cross-runtime story.
+
+- `DATASUM` and `CHECKSUM` verification.
+- Structural conformance check at `fitsverify` level.
+- Strict vs lenient parse modes, default lenient with a `warnings`
+  channel.
+- Full CI matrix: Node 22/24, Bun, Deno, Workers, headless browser.
+
+### Beyond 0.7.0
+
+Planned, not yet versioned: the `PLIO_1` and `HCOMPRESS_1` tile codecs,
+SIP and TPV distortion, spectral and time WCS, compressed BINTABLE, and
+a DuckDB-wasm table function.

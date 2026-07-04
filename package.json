@@ -17,6 +17,8 @@
     "test": "turbo run test",
     "test:coverage": "turbo run test:coverage",
     "test:integration": "turbo run test:integration",
+    "docs:build": "turbo run docs:build",
+    "docs:dev": "turbo run docs:dev",
     "blt": "turbo run build lint test",
     "clean": "turbo run clean",
     "changeset": "changeset",
@@ -32,5 +34,11 @@
     "turbo": "^2.9.12",
     "typescript": "catalog:"
   },
-  "prettier": "@fits-js/prettier-config"
+  "prettier": "@fits-js/prettier-config",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp"
+    ]
+  }
 }

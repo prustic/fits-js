@@ -1,0 +1,80 @@
+---
+title: Error handling
+description: FitsError hierarchy and structured context for failures.
+---
+
+Every throw from `@fits-js/core` is a `FitsError` or one of its
+subclasses. Each subclass carries structured properties beside the
+message so callers can branch on cause without parsing strings.
+
+```ts
+import {
+  FitsError,
+  FitsHeaderError,
+  FitsStructureError,
+  FitsUnsupportedError,
+  FitsIoError,
+} from "@fits-js/core";
+```
+
+## The hierarchy
+
+- `FitsError` is the base class. Every other library error extends it.
+- `FitsHeaderError` covers malformed cards (bad keyword grammar,
+  unparseable values, unterminated strings). Carries `cardIndex`,
+  `keyword`, and `rawCard` for the offending card.
+- `FitsStructureError` covers HDUs whose structural keywords are out of
+  domain or inconsistent (negative `NAXIS`, mismatched `TFIELDS`, random
+  groups). Carries `hduIndex`.
+- `FitsUnsupportedError` covers features that are recognized but not
+  implemented, such as tile-compressed data and ASCII table decode.
+  Carries `hduIndex`.
+- `FitsIoError` covers filesystem failures, HTTP failures, abort signals,
+  and out-of-range reads. Carries `url`, `status`, and/or `offset` when
+  relevant.
+
+## Branching on cause
+
+```ts
+import { openFits, FitsHeaderError, FitsIoError } from "@fits-js/core";
+
+try {
+  const { hdus } = await openFits(reader);
+  // ...
+} catch (err) {
+  if (err instanceof FitsHeaderError) {
+    console.error(`malformed card ${err.cardIndex} (${err.keyword}): ${err.message}`);
+  } else if (err instanceof FitsIoError) {
+    console.error(`I/O for ${err.url} (status ${err.status}): ${err.message}`);
+  } else {
+    throw err;
+  }
+}
+```
+
+## Warnings instead of throws
+
+`openFits` and `readHdus` return a `warnings: readonly string[]` list
+alongside the HDUs. The library prefers degrading to a warning when the
+file is recoverable. A missing `END` near the file end, a non-conforming
+value with a plausible coercion, a truncated data unit. Pass `{ strict:
+true }` to escalate every warning to a throw.
+
+```ts
+const { hdus, warnings } = await openFits(reader);
+for (const w of warnings) console.warn(w);
+```
+
+## Aborting
+
+The readers and the enumerator accept an `AbortSignal`. Cancelling
+rejects the in-flight read with a `FitsIoError` whose `cause` is the
+abort reason.
+
+```ts
+const controller = new AbortController();
+setTimeout(() => controller.abort(), 5000);
+
+const reader = new HttpRangeReader(url, { signal: controller.signal });
+const { hdus } = await openFits(reader, { signal: controller.signal });
+```

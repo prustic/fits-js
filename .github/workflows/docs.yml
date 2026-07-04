@@ -1,0 +1,54 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/docs/**"
+      - "packages/*/src/**"
+      - "packages/*/package.json"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/docs/**"
+      - "packages/*/src/**"
+      - "packages/*/package.json"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: actions/cache@v5
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-docs-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-docs-
+            ${{ runner.os }}-turbo-
+
+      - run: pnpm docs:build
+
+      # Deploy is intentionally held until the 0.1.0 tag lands. The build above
+      # is enough to gate every PR on a green docs build; the upload-pages and
+      # deploy-pages steps will be enabled in the same commit that cuts 0.1.0.

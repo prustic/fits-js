@@ -1,0 +1,62 @@
+---
+title: Reading over HTTP
+description: HttpRangeReader and the lazy enumeration path.
+---
+
+`HttpRangeReader` issues HTTP `Range` requests for the bytes a read asks
+for. A small cutout from a 4 GB file over the network costs a few
+kilobytes.
+
+```ts
+import { HttpRangeReader, openFits, readImage } from "@fits-js/core";
+
+const reader = new HttpRangeReader("https://example.test/cube.fits");
+const { hdus } = await openFits(reader);
+
+const region = { start: [0, 0], shape: [8, 8] };
+const { data } = await readImage(hdus[0], reader, { region });
+```
+
+## What the reader fetches
+
+- `openFits(reader)` reads the 2880-byte header block for the primary HDU,
+  then enough header blocks for each extension to hit `END`. Nothing in
+  any data unit.
+- `readImage(hdu, reader, { region })` reads only the byte ranges that
+  region covers, page-aligned to the reader's page size (default 64 KiB).
+- `readImage(hdu, reader)` (no region) reads the whole data unit.
+
+## Caching and validation
+
+The reader keeps an LRU page cache (default 8 MiB) and merges nearby
+ranges into single requests. An `ETag` or `Last-Modified` from the first
+response is replayed as `If-Range` on subsequent requests. A server that
+does not send a validator can still serve cached pages, but a mid-read
+change cannot be detected.
+
+## When the server ignores `Range`
+
+`HttpRangeReader` probes with `bytes=0-0` on the first read. A `206
+Partial Content` answer keeps the range path. A `200 OK` answer (server
+ignored the header) falls back to fetching the whole body once. Later
+reads serve from memory and do not touch the network.
+
+A `416 Range Not Satisfiable` on the probe throws, because the resource
+is either empty or refusing the request entirely.
+
+## Options
+
+```ts
+new HttpRangeReader(url, {
+  fetch: customFetch, // defaults to globalThis.fetch
+  pageSize: 65536, // bytes per cached page
+  coalesceGap: 16384, // merge missing-page runs separated by <= N bytes
+  maxCacheBytes: 8 * 1024 * 1024,
+  headers: { Authorization: "Bearer ..." },
+  signal: AbortSignal.timeout(30_000),
+});
+```
+
+The injectable `fetch` is useful for retry middleware, request logging, or
+runtimes where `fetch` is not global. The `AbortSignal` cancels in-flight
+requests.

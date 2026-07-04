@@ -1,0 +1,122 @@
+---
+title: Quickstart
+description: Open a FITS file from disk, over HTTP, or from a browser input, and read a cutout.
+---
+
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
+## Before you start
+
+You need:
+
+- Node.js 22 or later for the Node path.
+- Any modern browser for the `BlobReader` and `HttpRangeReader` paths.
+
+## Install
+
+{/* prettier-ignore */}
+<Tabs syncKey="pkg">
+  <TabItem label="npm">
+    ```sh
+    npm install @fits-js/core
+    ```
+  </TabItem>
+  <TabItem label="pnpm">
+    ```sh
+    pnpm add @fits-js/core
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    ```sh
+    yarn add @fits-js/core
+    ```
+  </TabItem>
+  <TabItem label="bun">
+    ```sh
+    bun add @fits-js/core
+    ```
+  </TabItem>
+</Tabs>
+
+Everything comes from the same entry. Pick the reader that fits the byte
+source.
+
+## Open a local file
+
+```ts
+import { NodeFileReader, openFits, readImage } from "@fits-js/core";
+
+const reader = await NodeFileReader.open("data/image.fits");
+try {
+  const { hdus } = await openFits(reader);
+  const primary = hdus[0];
+
+  const region = { start: [0, 0], shape: [16, 16] };
+  const { data } = await readImage(primary, reader, { region });
+  console.log(data.slice(0, 8));
+} finally {
+  await reader.close();
+}
+```
+
+`openFits` enumerates HDUs and reads only header blocks. `readImage` with a
+`region` only reads the bytes that region covers, so a small cutout from a
+multi-gigabyte cube stays cheap.
+
+## Open a file over HTTP
+
+```ts
+import { HttpRangeReader, openFits, readImage } from "@fits-js/core";
+
+const reader = new HttpRangeReader("https://example.test/cube.fits");
+const { hdus } = await openFits(reader);
+const primary = hdus[0];
+
+const region = { start: [0, 0], shape: [8, 8] };
+const { data } = await readImage(primary, reader, { region });
+```
+
+`HttpRangeReader` issues HTTP `Range` requests for the bytes `openFits` and
+`readImage` ask for, and nothing else. A 1.2 MB file with five image
+extensions costs about 55 KB to enumerate and 64 bytes for the 8x2 Float32
+cutout above.
+
+If the server answers the initial `bytes=0-0` probe with `200` (ignoring the
+range), the reader falls back to fetching the whole body once and serving
+later reads from memory.
+
+## Open a file in the browser
+
+```ts
+import { BlobReader, openFits, readImage } from "@fits-js/core";
+
+const input = document.querySelector<HTMLInputElement>("input[type=file]")!;
+input.addEventListener("change", async () => {
+  const file = input.files?.[0];
+  if (!file) return;
+
+  const reader = new BlobReader(file);
+  const { hdus } = await openFits(reader);
+  const primary = hdus[0];
+
+  const { data } = await readImage(primary, reader);
+  // ...render or analyze
+});
+```
+
+The same code path works for `File` (from a picker) and `Blob` (from `fetch`,
+IndexedDB, or any other Web source).
+
+## A note on the lazy cutout
+
+None of the snippets above ever read more than they need.
+
+- `openFits(reader)` reads only the 2880-byte header blocks for each HDU.
+- `readImage(primary, reader, { region })` reads only the bytes the region
+  spans.
+- Reading without a `region` returns the full image.
+
+A 4 GB cube with a tiny region cutout still costs only a few kilobytes of
+network or disk, which is the point. See
+[`examples/http-range`](https://github.com/prustic/fits-js/tree/main/examples/http-range)
+for a complete program that prints the byte counts.

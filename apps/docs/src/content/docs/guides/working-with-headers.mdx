@@ -1,0 +1,85 @@
+---
+title: Working with headers
+description: FitsHeader keyword access, indexed keywords, and CONTINUE.
+---
+
+Every HDU carries its header as a `FitsHeader`. The class exposes typed
+accessors and iteration over the raw cards.
+
+```ts
+const naxis = hdu.header.getNumber("NAXIS"); // number | undefined
+const obs = hdu.header.getString("OBSERVER"); // string | undefined
+const simple = hdu.header.getBoolean("SIMPLE"); // boolean | undefined
+const raw = hdu.header.get("BSCALE"); // HeaderValue
+```
+
+`HeaderValue` is `string | number | bigint | boolean | FitsComplex |
+undefined`. The typed accessors narrow the result and return `undefined`
+when the keyword is missing or holds the wrong type.
+
+## Indexed keywords
+
+Axis lengths are `NAXIS1`, `NAXIS2`, .... Table columns are `TFORM1`,
+`TFORM2`, .... The header treats those as ordinary keywords. Build the
+name with template literals.
+
+```ts
+const naxis = hdu.header.getNumber("NAXIS") ?? 0;
+const dims: number[] = [];
+for (let i = 1; i <= naxis; i++) {
+  dims.push(hdu.header.getNumber(`NAXIS${i}`) ?? 0);
+}
+```
+
+## `CONTINUE` and `HIERARCH`
+
+Long string values that span multiple cards via the `CONTINUE` convention
+are assembled into a single string by the parser. Long keywords using the
+`HIERARCH` convention (including the ESO dialect) are matched on the full
+keyword text.
+
+```ts
+const longName = hdu.header.getString("HIERARCH ESO INS PIPE DETECT");
+const longText = hdu.header.getString("FILENAME"); // CONTINUE-assembled
+```
+
+## `COMMENT` and `HISTORY`
+
+```ts
+for (const c of hdu.header.comments) console.log("COMMENT:", c);
+for (const h of hdu.header.history) console.log("HISTORY:", h);
+```
+
+Each list contains the text bodies of the corresponding cards in file
+order.
+
+## Duplicates
+
+A header may legitimately repeat a keyword. `get` returns the first match.
+`getAll` returns every value in card order.
+
+```ts
+const firstHistory = hdu.header.get("HISTORY");
+const allHistory = hdu.header.getAll("HISTORY");
+```
+
+## Parsing raw header bytes
+
+`openFits` handles whole files. When you already hold header bytes without
+a file around them, `parseHeader` parses a `FitsHeader` straight from a
+buffer. It walks the 2880-byte blocks until the `END` card and resolves
+`CONTINUE` long strings. Nothing past the header is touched.
+
+```ts
+import { parseHeader } from "@fits-js/core";
+
+const { header, byteLength, warnings, endFound } = parseHeader(bytes);
+header.getNumber("NAXIS"); // 2
+// the data unit begins at byteLength
+```
+
+`byteLength` is always a multiple of 2880 and marks where the data unit
+(or the next HDU) starts. `endFound` is `false` when the supplied bytes
+ran out before an `END` card appeared. Like `openFits`, the parser is
+lenient by default and reports recovered violations on `warnings`. Pass
+`{ strict: true }` to throw instead.

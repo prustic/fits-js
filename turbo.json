@@ -25,6 +25,14 @@
     "test:integration": {
       "dependsOn": ["build"]
     },
+    "docs:build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "docs:dev": {
+      "cache": false,
+      "persistent": true
+    },
     "clean": {
       "cache": false
     }
