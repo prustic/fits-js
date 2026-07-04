@@ -34,11 +34,5 @@
     "turbo": "^2.10.3",
     "typescript": "catalog:"
   },
-  "prettier": "@fits-js/prettier-config",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "sharp"
-    ]
-  }
+  "prettier": "@fits-js/prettier-config"
 }
