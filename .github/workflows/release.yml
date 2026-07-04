@@ -41,10 +41,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # The docs deploy listens on workflow_dispatch, which is exempt from
-      # GitHub's suppression of workflow runs for GITHUB_TOKEN-created events.
-      - name: Deploy docs
+      # Dispatch, not `release: published`: GITHUB_TOKEN-created events
+      # don't trigger workflows.
+      - name: Deploy docs on publish
         if: steps.changesets.outputs.published == 'true'
-        run: gh workflow run docs.yml --ref main
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run docs.yml --ref main
