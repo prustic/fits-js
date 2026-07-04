@@ -3,6 +3,7 @@ title: fits-js
 description: A TypeScript FITS parser. Lazy random-access reads in Node and the browser.
 ---
 
+import { Tabs, TabItem } from "@astrojs/starlight/components";
 import HorseheadHero from "../../components/HorseheadHero.astro";
 
 <HorseheadHero />
@@ -14,9 +15,29 @@ only the bytes that cutout covers.
 
 ## Install
 
-```sh
-pnpm add @fits-js/core
-```
+{/* prettier-ignore */}
+<Tabs syncKey="pkg">
+  <TabItem label="npm">
+    ```sh
+    npm install @fits-js/core
+    ```
+  </TabItem>
+  <TabItem label="pnpm">
+    ```sh
+    pnpm add @fits-js/core
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    ```sh
+    yarn add @fits-js/core
+    ```
+  </TabItem>
+  <TabItem label="bun">
+    ```sh
+    bun add @fits-js/core
+    ```
+  </TabItem>
+</Tabs>
 
 Zero runtime dependencies. Node 22 or later. In the browser, any environment
 with `fetch`, `Blob`, and `TypedArray` works.

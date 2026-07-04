@@ -125,11 +125,10 @@ function tagDates(versions: readonly string[]): Map<string, string> {
 
   for (const version of versions) {
     try {
-      const iso = execFileSync(
-        "git",
-        ["log", "-1", "--format=%cI", `@fits-js/core@${version}`],
-        { cwd: REPO_ROOT, encoding: "utf8" },
-      ).trim();
+      const iso = execFileSync("git", ["log", "-1", "--format=%cI", `@fits-js/core@${version}`], {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+      }).trim();
 
       if (iso) {
         dates.set(version, iso.slice(0, 10));
@@ -184,10 +183,7 @@ function render(
   pushFrontmatter(lines);
 
   if (versions.length === 0) {
-    lines.push(
-      "Once the first release ships, per-version detail also appears on this page.",
-      "",
-    );
+    lines.push("Once the first release ships, per-version detail also appears on this page.", "");
     return lines.join("\n");
   }
 

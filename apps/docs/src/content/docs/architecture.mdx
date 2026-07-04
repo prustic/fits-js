@@ -1,0 +1,68 @@
+---
+title: Architecture
+description: The byte-source abstraction and the lazy read path.
+---
+
+import Mermaid from "../../components/Mermaid.astro";
+
+fits-js separates _what to read_ from _where the bytes come from_. The parser and the image decoder ask for byte ranges through one interface, and four adapters supply those ranges from different sources. This page traces how that keeps reads lazy.
+
+## The `RandomAccessReader` interface
+
+```ts
+interface RandomAccessReader {
+  readonly size: number | undefined;
+  read(offset: number, length: number): Promise<Uint8Array>;
+  close?(): Promise<void>;
+}
+```
+
+Everything above the interface is runtime-agnostic. The four implementations:
+
+- `BytesReader` wraps bytes already in memory.
+- `BlobReader` slices a browser `Blob` or `File`.
+- `HttpRangeReader` turns each read into HTTP `Range` requests.
+- `NodeFileReader` reads through a `node:fs/promises` file handle. The import is dynamic, so the module loads in browsers even though the class only works where `node:fs` exists.
+
+## Opening a file reads only headers
+
+<Mermaid
+  title="openFits over HTTP: only header blocks cross the network"
+  code={`
+sequenceDiagram
+  participant App as Your code
+  participant Core as openFits
+  participant Reader as HttpRangeReader
+  participant Server as HTTP server
+
+App->>Core: openFits(reader)
+Core->>Reader: read header blocks (HDU 0)
+Reader->>Server: GET Range: bytes=...
+Server-->>Reader: 206 Partial Content
+Note over Core: Data unit size computed<br/>from NAXIS/BITPIX keywords.<br/>Data bytes never fetched.
+Core->>Reader: read header blocks (HDU 1)
+Reader->>Server: GET Range: bytes=...
+Server-->>Reader: 206 Partial Content
+Core-->>App: { hdus, warnings }
+`}
+/>
+
+FITS headers are 2880-byte blocks ending in an `END` card. For each HDU, `openFits` reads header blocks until `END`, computes the data unit's byte length from the structural keywords (`BITPIX`, `NAXIS`, `NAXISn`), and seeks past it. The data unit is located and measured, never fetched. Malformed structure degrades to entries on the `warnings` list unless `{ strict: true }` escalates them to throws.
+
+## Cutouts fetch only their bytes
+
+`readImage` with a `region` computes which byte ranges inside the data unit the region covers and reads only those. The decoder then applies `BZERO`/`BSCALE` scaling, the unsigned-integer convention, and `BLANK` handling on the fetched bytes. FITS stores big-endian, and decoding produces native-endian typed arrays.
+
+On `HttpRangeReader` those region reads become a handful of `Range` requests. The reader caches fetched pages (64 KiB by default, 8 MiB budget) and merges nearby missing ranges into single requests, so row-by-row region reads don't degrade into one request per row.
+
+## What `HttpRangeReader` guards
+
+Remote files can change or be served by misbehaving servers, so the reader is defensive:
+
+- The first read probes with `bytes=0-0`. A `206` answer keeps the range path and captures the total size from `Content-Range`. A `200` answer means the server ignored `Range`, and the whole body is read once and served from memory after that.
+- A validator from the first response (`ETag` or `Last-Modified`) is replayed as `If-Range` on later requests, so a file that changes mid-read is detected instead of silently mixing two versions. A server that sends no validator cannot be checked this way.
+- Short `206` responses are followed up until the requested range is satisfied. End of file is concluded only from the known size or a `416`, never from a cache miss.
+
+## Package boundaries
+
+`@fits-js/core` has zero runtime dependencies and stays browser-safe. Capabilities with their own dependency footprint ship as separate packages when they land: `@fits-js/arrow` for BINTABLE-to-Arrow (depends on `apache-arrow`), `@fits-js/wcs` for coordinate transforms, `@fits-js/render` for display-scaling primitives. The [Roadmap](/fits-js/roadmap/) has the sequence.

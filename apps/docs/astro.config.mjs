@@ -64,6 +64,13 @@ export default defineConfig({
             { label: "Error handling", slug: "guides/error-handling" },
           ],
         },
+        {
+          label: "Resources",
+          items: [
+            { label: "Examples", slug: "examples" },
+            { label: "Architecture", slug: "architecture" },
+          ],
+        },
         typeDocSidebarGroup,
         {
           label: "Project",

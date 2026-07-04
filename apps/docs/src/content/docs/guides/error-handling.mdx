@@ -27,7 +27,7 @@ import {
   domain or inconsistent (negative `NAXIS`, mismatched `TFIELDS`, random
   groups). Carries `hduIndex`.
 - `FitsUnsupportedError` covers features that are recognized but not
-  implemented (tile-compressed data, ASCII tables in the 0.1.0 window).
+  implemented, such as tile-compressed data and ASCII table decode.
   Carries `hduIndex`.
 - `FitsIoError` covers filesystem failures, HTTP failures, abort signals,
   and out-of-range reads. Carries `url`, `status`, and/or `offset` when
