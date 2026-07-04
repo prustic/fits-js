@@ -21,7 +21,7 @@ jobs:
       matrix:
         node-version: ["22", "24"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v6
 
@@ -32,7 +32,7 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: .turbo
           key: ${{ runner.os }}-node${{ matrix.node-version }}-turbo-${{ github.sha }}
@@ -47,7 +47,7 @@ jobs:
       - run: pnpm test:integration
         if: ${{ matrix.node-version == '22' }}
 
-      - uses: codecov/codecov-action@v5
+      - uses: codecov/codecov-action@v7
         if: ${{ always() && matrix.node-version == '22' }}
         with:
           files: packages/fits-core/coverage/lcov.info
