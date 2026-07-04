@@ -6,8 +6,9 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
+    "changelog:build": "node scripts/build-changelog.ts",
     "docs:dev": "astro dev",
-    "docs:build": "astro build",
+    "docs:build": "pnpm changelog:build && astro build",
     "preview": "astro preview",
     "astro": "astro",
     "clean": "git clean -xdf .astro .turbo dist node_modules"
