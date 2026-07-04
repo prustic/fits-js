@@ -26,9 +26,7 @@ Everything above the interface is runtime-agnostic. The four implementations:
 
 ## Opening a file reads only headers
 
-<Mermaid
-  title="openFits over HTTP: only header blocks cross the network"
-  code={`
+<Mermaid title="openFits over HTTP: only header blocks cross the network" code={`
 sequenceDiagram
   participant App as Your code
   participant Core as openFits
@@ -44,8 +42,7 @@ Core->>Reader: read header blocks (HDU 1)
 Reader->>Server: GET Range: bytes=...
 Server-->>Reader: 206 Partial Content
 Core-->>App: { hdus, warnings }
-`}
-/>
+`} />
 
 FITS headers are 2880-byte blocks ending in an `END` card. For each HDU, `openFits` reads header blocks until `END`, computes the data unit's byte length from the structural keywords (`BITPIX`, `NAXIS`, `NAXISn`), and seeks past it. The data unit is located and measured, never fetched. Malformed structure degrades to entries on the `warnings` list unless `{ strict: true }` escalates them to throws.
 
