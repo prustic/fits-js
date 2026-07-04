@@ -103,9 +103,8 @@ function classify(header: FitsHeader, index: number): HduType {
   return XTENSION_TYPES.get(header.getString("XTENSION") ?? "") ?? "unknown";
 }
 
-// A conforming header block always holds SIMPLE/XTENSION + END, never all
-// zeros; an all-zero block is therefore trailing fill, so stop. (astropy
-// instead probes for a valid next header.)
+// A conforming header block always holds SIMPLE/XTENSION + END, so an
+// all-zero block can only be trailing fill.
 function isAllZero(bytes: Uint8Array): boolean {
   for (let i = 0; i < bytes.length; i++) if (bytes[i] !== 0) return false;
   return true;
@@ -117,14 +116,7 @@ interface HduStep {
   readonly stop: boolean;
 }
 
-// Zero HDUs means the input was never FITS (too short, or leading zero
-// fill), which is indistinguishable from a legitimately empty result
-// without a diagnostic. astropy raises OSError on both shapes.
-function rejectEmptyInput(
-  reason: "short" | "zeros",
-  strict: boolean,
-  warnings: string[],
-): void {
+function rejectEmptyInput(reason: "short" | "zeros", strict: boolean, warnings: string[]): void {
   const msg =
     reason === "short"
       ? "no HDUs: input is shorter than one 2880-byte block"
@@ -161,8 +153,7 @@ function buildHdu(
     warnings.push(msg);
   }
 
-  // Legal syntax declaring non-conformance, so it never throws (astropy
-  // accepts it silently); the declaration is surfaced instead of dropped.
+  // Legal syntax, so even strict mode accepts it, matching astropy.
   if (index === 0 && header.getBoolean("SIMPLE") === false) {
     warnings.push("primary header declares SIMPLE = F (data may not conform to the FITS standard)");
   }
@@ -410,14 +401,12 @@ export async function openFits(
       parsed = parseHeader(concatBlocks(blocks), lenient);
     }
 
-    // Strict needs a re-parse to surface throws the lenient loop suppressed.
     if (strict) {
       parsed = parseHeader(concatBlocks(blocks), options);
     }
     warnings.push(...parsed.warnings);
 
-    // Positional, matching readHdus. Unknown size is trusted; readImage
-    // backstops a short source.
+    // An unknown reader size is trusted, and readImage backstops a short source.
     const headerComplete = total === undefined || offset + parsed.byteLength <= total;
 
     const step = buildHdu(parsed, offset, index, total, headerComplete, strict, warnings);

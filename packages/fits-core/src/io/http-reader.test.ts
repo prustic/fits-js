@@ -299,9 +299,7 @@ test("HttpRangeReader: a body failure mid-range is wrapped as FitsIoError", asyn
         }),
       );
     }
-    return Promise.resolve(
-      terminatedBody(206, { "Content-Range": `bytes 0-1023/${data.length}` }),
-    );
+    return Promise.resolve(terminatedBody(206, { "Content-Range": `bytes 0-1023/${data.length}` }));
   }) as unknown as typeof globalThis.fetch;
   const r = new HttpRangeReader("https://x/f.fits", { fetch });
   await assert.rejects(

@@ -228,8 +228,6 @@ export function parseCard(raw80: string, ctx: CardParseContext): ParsedCard {
   }
 
   if (raw80[8] !== "=") {
-    // A non-commentary keyword with no value indicator is malformed:
-    // reject in strict, treat as commentary in lenient.
     reject(ctx, keyword, raw, `card has no value indicator: ${keyword}`);
     return {
       card: { keyword, value: undefined, commentary: true, raw },

@@ -136,7 +136,6 @@ export function parseHeader(
         cards.push(parsed.card);
       }
     }
-    // Advance to the next block boundary if the loop stopped mid-block.
     offset = blockEnd;
   }
 
