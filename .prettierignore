@@ -3,3 +3,8 @@ dist
 .turbo
 coverage
 pnpm-lock.yaml
+
+# Generated docs content
+apps/docs/.astro
+apps/docs/src/content/docs/api
+apps/docs/src/content/docs/changelog.mdx
