@@ -10,6 +10,12 @@ export default defineConfig({
       title: "fits-js",
       description: "A TypeScript FITS parser. Lazy random-access reads in Node and the browser.",
       lastUpdated: true,
+      head: [
+        {
+          tag: "meta",
+          attrs: { name: "referrer", content: "strict-origin-when-cross-origin" },
+        },
+      ],
       social: [
         {
           icon: "github",

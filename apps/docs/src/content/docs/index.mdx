@@ -1,6 +1,22 @@
 ---
 title: fits-js
 description: A TypeScript FITS parser. Lazy random-access reads in Node and the browser.
+head:
+  - tag: script
+    attrs:
+      type: application/ld+json
+    content: |
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareSourceCode",
+        "name": "fits-js",
+        "description": "A TypeScript FITS parser with lazy random-access reads. Runs in Node, browsers, Bun, and Deno.",
+        "url": "https://prustic.github.io/fits-js/",
+        "codeRepository": "https://github.com/prustic/fits-js",
+        "programmingLanguage": "TypeScript",
+        "license": "https://www.apache.org/licenses/LICENSE-2.0",
+        "keywords": "FITS, astronomy, TypeScript, parser, HTTP Range, browser"
+      }
 ---
 
 import { Tabs, TabItem } from "@astrojs/starlight/components";
