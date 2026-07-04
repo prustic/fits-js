@@ -62,3 +62,24 @@ A header may legitimately repeat a keyword. `get` returns the first match.
 const firstHistory = hdu.header.get("HISTORY");
 const allHistory = hdu.header.getAll("HISTORY");
 ```
+
+## Parsing raw header bytes
+
+`openFits` handles whole files. When you already hold header bytes without
+a file around them, `parseHeader` parses a `FitsHeader` straight from a
+buffer. It walks the 2880-byte blocks until the `END` card and resolves
+`CONTINUE` long strings. Nothing past the header is touched.
+
+```ts
+import { parseHeader } from "@fits-js/core";
+
+const { header, byteLength, warnings, endFound } = parseHeader(bytes);
+header.getNumber("NAXIS"); // 2
+// the data unit begins at byteLength
+```
+
+`byteLength` is always a multiple of 2880 and marks where the data unit
+(or the next HDU) starts. `endFound` is `false` when the supplied bytes
+ran out before an `END` card appeared. Like `openFits`, the parser is
+lenient by default and reports recovered violations on `warnings`. Pass
+`{ strict: true }` to throw instead.
