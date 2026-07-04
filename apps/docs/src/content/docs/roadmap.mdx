@@ -3,6 +3,36 @@ title: Roadmap
 description: Planned releases and what lands in each.
 ---
 
+import Mermaid from "../../components/Mermaid.astro";
+
+<Mermaid
+  code={`
+timeline TD
+  0.1.0 : Opens and previews FITS
+        : Header parsing, HDU enumeration
+        : Four readers, image data with cutouts
+  0.2.0 : Catalogs as Arrow
+        : BINTABLE and ASCII table decode
+        : @fits-js/arrow package
+  0.3.0 : Compressed survey data
+        : RICE_1, GZIP_1, GZIP_2
+        : Subtractive dither
+  0.4.0 : Sky coordinates
+        : Linear WCS + six projections
+        : @fits-js/wcs package
+  0.5.0 : Rendering primitives
+        : Stretches, z-scale, colormaps
+        : @fits-js/render package
+  0.6.0 : Writing FITS
+        : Write primary, IMAGE, BINTABLE
+        : CHECKSUM/DATASUM
+  0.7.0 : Trustworthy on real data
+        : Verify checksums
+        : Strict vs lenient parse
+        : Full cross-runtime CI
+`}
+/>
+
 ## Shipped
 
 Nothing shipped yet. 0.1.0 is in flight. See the

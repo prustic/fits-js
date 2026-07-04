@@ -25,6 +25,7 @@ export default defineConfig({
       editLink: {
         baseUrl: "https://github.com/prustic/fits-js/edit/main/apps/docs/",
       },
+      customCss: ["./src/styles/custom.css"],
       plugins: [
         starlightTypeDoc({
           entryPoints: ["../../packages/fits-core/src/index.ts"],
