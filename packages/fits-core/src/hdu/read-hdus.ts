@@ -117,6 +117,22 @@ interface HduStep {
   readonly stop: boolean;
 }
 
+// Zero HDUs means the input was never FITS (too short, or leading zero
+// fill), which is indistinguishable from a legitimately empty result
+// without a diagnostic. astropy raises OSError on both shapes.
+function rejectEmptyInput(
+  reason: "short" | "zeros",
+  strict: boolean,
+  warnings: string[],
+): void {
+  const msg =
+    reason === "short"
+      ? "no HDUs: input is shorter than one 2880-byte block"
+      : "no HDUs: first header block is all zeros";
+  if (strict) throw new FitsStructureError(msg);
+  warnings.push(msg);
+}
+
 /**
  * @internal The per-HDU body shared by {@link readHdus} (over a buffer) and
  * {@link openFits} (over a reader): the structural checks, classification,
@@ -143,6 +159,12 @@ function buildHdu(
     const msg = "primary header has no SIMPLE keyword";
     if (strict) throw new FitsStructureError(msg, { hduIndex: 0 });
     warnings.push(msg);
+  }
+
+  // Legal syntax declaring non-conformance, so it never throws (astropy
+  // accepts it silently); the declaration is surfaced instead of dropped.
+  if (index === 0 && header.getBoolean("SIMPLE") === false) {
+    warnings.push("primary header declares SIMPLE = F (data may not conform to the FITS standard)");
   }
 
   if (
@@ -272,6 +294,10 @@ export function readHdus(bytes: Uint8Array, options: ParseHeaderOptions = {}): R
     index++;
   }
 
+  if (hdus.length === 0) {
+    rejectEmptyInput(bytes.length < BLOCK ? "short" : "zeros", strict, warnings);
+  }
+
   return { hdus, warnings };
 }
 
@@ -353,9 +379,13 @@ export async function openFits(
 
   let offset = 0;
   let index = 0;
+  let emptyReason: "short" | "zeros" | undefined;
   for (;;) {
     const first = await readBlock(offset);
-    if (first === null || isAllZero(first)) break;
+    if (first === null || isAllZero(first)) {
+      if (index === 0) emptyReason = first === null ? "short" : "zeros";
+      break;
+    }
 
     // Grow lenient: parseHeader's strict mode throws on the partial first
     // block before the loop can fetch block two. Authoritative strict re-parse
@@ -395,6 +425,10 @@ export async function openFits(
     if (step.stop) break;
     offset = step.nextOffset;
     index++;
+  }
+
+  if (hdus.length === 0 && emptyReason !== undefined) {
+    rejectEmptyInput(emptyReason, strict, warnings);
   }
 
   return { hdus, warnings };

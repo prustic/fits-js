@@ -254,3 +254,13 @@ test("openFits respects an AbortSignal", async () => {
     (e: unknown) => e instanceof Error && !(e instanceof FitsIoError) && e.name === "AbortError",
   );
 });
+
+test("openFits over an empty reader warns rather than returning silently", async () => {
+  const { hdus, warnings } = await openFits(new BytesReader(new Uint8Array(0)));
+  assert.equal(hdus.length, 0);
+  assert.ok(warnings.some((w) => w.includes("shorter than one 2880-byte block")));
+  await assert.rejects(
+    () => openFits(new BytesReader(new Uint8Array(2880)), { strict: true }),
+    FitsStructureError,
+  );
+});
