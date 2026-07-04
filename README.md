@@ -14,6 +14,7 @@
   <p align="center">
     <a href="https://github.com/prustic/fits-js/actions/workflows/ci.yml"><img src="https://github.com/prustic/fits-js/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
     <a href="https://codecov.io/gh/prustic/fits-js"><img src="https://codecov.io/gh/prustic/fits-js/graph/badge.svg" alt="codecov" /></a>
+    <a href="https://www.npmjs.com/package/@fits-js/core"><img src="https://img.shields.io/npm/v/@fits-js/core?style=flat&colorA=000000&colorB=000000" alt="npm version" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License" /></a>
   </p>
 </p>
