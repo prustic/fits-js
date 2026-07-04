@@ -1,7 +1,7 @@
 {
   "name": "@fits-js/core",
   "version": "0.0.0",
-  "description": "Pure TypeScript core: FITS parser, RandomAccessReader, and tile decompression, no runtime dependencies",
+  "description": "FITS file parser for JavaScript and TypeScript, in Node and the browser, with no runtime dependencies",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
