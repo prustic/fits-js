@@ -103,9 +103,8 @@ function classify(header: FitsHeader, index: number): HduType {
   return XTENSION_TYPES.get(header.getString("XTENSION") ?? "") ?? "unknown";
 }
 
-// A conforming header block always holds SIMPLE/XTENSION + END, never all
-// zeros; an all-zero block is therefore trailing fill, so stop. (astropy
-// instead probes for a valid next header.)
+// A conforming header block always holds SIMPLE/XTENSION + END, so an
+// all-zero block can only be trailing fill.
 function isAllZero(bytes: Uint8Array): boolean {
   for (let i = 0; i < bytes.length; i++) if (bytes[i] !== 0) return false;
   return true;
@@ -115,6 +114,15 @@ interface HduStep {
   readonly hdu: Hdu;
   readonly nextOffset: number;
   readonly stop: boolean;
+}
+
+function rejectEmptyInput(reason: "short" | "zeros", strict: boolean, warnings: string[]): void {
+  const msg =
+    reason === "short"
+      ? "no HDUs: input is shorter than one 2880-byte block"
+      : "no HDUs: first header block is all zeros";
+  if (strict) throw new FitsStructureError(msg);
+  warnings.push(msg);
 }
 
 /**
@@ -143,6 +151,11 @@ function buildHdu(
     const msg = "primary header has no SIMPLE keyword";
     if (strict) throw new FitsStructureError(msg, { hduIndex: 0 });
     warnings.push(msg);
+  }
+
+  // Legal syntax, so even strict mode accepts it, matching astropy.
+  if (index === 0 && header.getBoolean("SIMPLE") === false) {
+    warnings.push("primary header declares SIMPLE = F (data may not conform to the FITS standard)");
   }
 
   if (
@@ -272,6 +285,10 @@ export function readHdus(bytes: Uint8Array, options: ParseHeaderOptions = {}): R
     index++;
   }
 
+  if (hdus.length === 0) {
+    rejectEmptyInput(bytes.length < BLOCK ? "short" : "zeros", strict, warnings);
+  }
+
   return { hdus, warnings };
 }
 
@@ -353,9 +370,13 @@ export async function openFits(
 
   let offset = 0;
   let index = 0;
+  let emptyReason: "short" | "zeros" | undefined;
   for (;;) {
     const first = await readBlock(offset);
-    if (first === null || isAllZero(first)) break;
+    if (first === null || isAllZero(first)) {
+      if (index === 0) emptyReason = first === null ? "short" : "zeros";
+      break;
+    }
 
     // Grow lenient: parseHeader's strict mode throws on the partial first
     // block before the loop can fetch block two. Authoritative strict re-parse
@@ -380,14 +401,12 @@ export async function openFits(
       parsed = parseHeader(concatBlocks(blocks), lenient);
     }
 
-    // Strict needs a re-parse to surface throws the lenient loop suppressed.
     if (strict) {
       parsed = parseHeader(concatBlocks(blocks), options);
     }
     warnings.push(...parsed.warnings);
 
-    // Positional, matching readHdus. Unknown size is trusted; readImage
-    // backstops a short source.
+    // An unknown reader size is trusted, and readImage backstops a short source.
     const headerComplete = total === undefined || offset + parsed.byteLength <= total;
 
     const step = buildHdu(parsed, offset, index, total, headerComplete, strict, warnings);
@@ -395,6 +414,10 @@ export async function openFits(
     if (step.stop) break;
     offset = step.nextOffset;
     index++;
+  }
+
+  if (hdus.length === 0 && emptyReason !== undefined) {
+    rejectEmptyInput(emptyReason, strict, warnings);
   }
 
   return { hdus, warnings };

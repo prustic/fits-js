@@ -138,6 +138,27 @@ export class HttpRangeReader implements RandomAccessReader {
     }
   }
 
+  /**
+   * `fetch` resolves once headers arrive; the body can still fail mid-stream
+   * (early-terminated transfer, connection reset). Wrap it like `_doFetch`
+   * wraps the request, keeping the abort passthrough.
+   */
+  private async _readBody(res: Response): Promise<Uint8Array> {
+    try {
+      return new Uint8Array(await res.arrayBuffer());
+    } catch (cause) {
+      if (this._signal?.aborted && cause instanceof Error) {
+        throw cause;
+      }
+
+      throw new FitsIoError(`response body failed for ${this._urlStr}`, {
+        url: this._urlStr,
+        status: res.status,
+        cause,
+      });
+    }
+  }
+
   private _ensureMeta(): Promise<void> {
     // Single-flight: concurrent first reads must not double-probe.
     this._metaPromise ??= (async () => {
@@ -146,9 +167,9 @@ export class HttpRangeReader implements RandomAccessReader {
       if (res.status === 206) {
         this._size = HttpRangeReader._parseContentRangeTotal(res.headers.get("content-range"));
         this._etag = res.headers.get("etag") ?? res.headers.get("last-modified") ?? undefined;
-        await res.arrayBuffer();
+        await this._readBody(res);
       } else if (res.ok) {
-        this._full = new Uint8Array(await res.arrayBuffer());
+        this._full = await this._readBody(res);
         this._size = this._full.length;
       } else if (res.status === 416) {
         throw new FitsIoError(`empty or unsatisfiable resource ${this._urlStr}`, {
@@ -239,7 +260,7 @@ export class HttpRangeReader implements RandomAccessReader {
         if (reportedSize !== undefined) this._size = reportedSize;
       }
 
-      const body = new Uint8Array(await res.arrayBuffer());
+      const body = await this._readBody(res);
       if (body.length === 0) {
         if (this._size === undefined || cur < this._size) this._size = cur;
         break;

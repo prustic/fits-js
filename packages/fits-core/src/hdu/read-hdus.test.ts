@@ -454,3 +454,45 @@ test("an absurd declared size is reported as overflow, not as truncation", () =>
   assert.ok(!warnings.some((w) => w.includes("truncated")));
   assert.throws(() => readHdus(bad, { strict: true }), FitsStructureError);
 });
+
+test("empty input warns rather than returning silently", () => {
+  const { hdus, warnings } = readHdus(new Uint8Array(0));
+  assert.equal(hdus.length, 0);
+  assert.ok(warnings.some((w) => w.includes("shorter than one 2880-byte block")));
+});
+
+test("an all-zero first block warns rather than returning silently", () => {
+  const { hdus, warnings } = readHdus(new Uint8Array(2880));
+  assert.equal(hdus.length, 0);
+  assert.ok(warnings.some((w) => w.includes("first header block is all zeros")));
+});
+
+test("strict mode rejects empty and all-zero input", () => {
+  assert.throws(() => readHdus(new Uint8Array(0), { strict: true }), FitsStructureError);
+  assert.throws(() => readHdus(new Uint8Array(2880), { strict: true }), FitsStructureError);
+});
+
+test("trailing zero fill after a valid HDU stays silent", () => {
+  const primary = hdu([
+    "SIMPLE  =                    T",
+    "BITPIX  =                    8",
+    "NAXIS   =                    0",
+  ]);
+  const { hdus, warnings } = readHdus(concat(primary, new Uint8Array(2880)));
+  assert.equal(hdus.length, 1);
+  assert.deepEqual(warnings, []);
+});
+
+test("SIMPLE = F warns in both modes and never throws", () => {
+  const bytes = hdu([
+    "SIMPLE  =                    F",
+    "BITPIX  =                    8",
+    "NAXIS   =                    0",
+  ]);
+  const lenient = readHdus(bytes);
+  assert.equal(lenient.hdus.length, 1);
+  assert.ok(lenient.warnings.some((w) => w.includes("SIMPLE = F")));
+  const strictRes = readHdus(bytes, { strict: true });
+  assert.equal(strictRes.hdus.length, 1);
+  assert.ok(strictRes.warnings.some((w) => w.includes("SIMPLE = F")));
+});
