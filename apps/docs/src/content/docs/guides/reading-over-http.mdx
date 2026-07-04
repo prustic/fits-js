@@ -26,6 +26,12 @@ const { data } = await readImage(hdus[0], reader, { region });
   region covers, page-aligned to the reader's page size (default 64 KiB).
 - `readImage(hdu, reader)` (no region) reads the whole data unit.
 
+Pages are the fetch unit, so the default `pageSize` sets the granularity
+of both paths: a 4x4 cutout still costs at least one 64 KiB page, and
+enumerating a file with many small HDUs costs pages-touched times
+`pageSize`. A smaller `pageSize` trades more requests for fewer bytes
+when cutouts or headers are small.
+
 ## Caching and validation
 
 The reader keeps an LRU page cache (default 8 MiB) and merges nearby
@@ -36,10 +42,13 @@ change cannot be detected.
 
 ## When the server ignores `Range`
 
-`HttpRangeReader` probes with `bytes=0-0` on the first read. A `206
-Partial Content` answer keeps the range path. A `200 OK` answer (server
-ignored the header) falls back to fetching the whole body once. Later
-reads serve from memory and do not touch the network.
+`HttpRangeReader` probes with `bytes=0-0` on the first read, which
+establishes the total size and the `If-Range` validator. That is one
+extra round trip per fresh reader, worth knowing on a latency-sensitive
+single-cutout path. A `206 Partial Content` answer keeps the range path.
+A `200 OK` answer (server ignored the header) falls back to fetching the
+whole body once. Later reads serve from memory and do not touch the
+network.
 
 A `416 Range Not Satisfiable` on the probe throws, because the resource
 is either empty or refusing the request entirely.

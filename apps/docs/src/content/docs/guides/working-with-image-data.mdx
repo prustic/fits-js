@@ -23,6 +23,15 @@ const { data, shape } = await readImage(hdu, reader, { region });
 covering the region. On `HttpRangeReader` that drops to a handful of HTTP
 ranges.
 
+The region must be full-rank: a two-element region on a `NAXIS = 3` cube
+throws rather than guessing which plane you meant. To read one plane of a
+cube, pin the third axis:
+
+```ts
+// plane p of an n1 x n2 x n3 cube
+const region = { start: [0, 0, p], shape: [n1, n2, 1] };
+```
+
 ## BITPIX and the returned array
 
 The `data` field type follows `BITPIX` and the scaling applied.
