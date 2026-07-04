@@ -20,7 +20,7 @@
 </p>
 
 > [!NOTE]
-> This project is in early development (v0.1.0) and is not recommended for production usage, but feedback is very welcome on [GitHub](https://github.com/prustic/fits-js/issues).
+> This project is in early development and is not recommended for production usage, but feedback is very welcome on [GitHub](https://github.com/prustic/fits-js/issues).
 
 ## About
 

@@ -14,6 +14,7 @@ jobs:
       contents: write
       pull-requests: write
       id-token: write
+      actions: write
     steps:
       - uses: actions/checkout@v7
 
@@ -37,5 +38,13 @@ jobs:
           version: pnpm version-packages
           publish: pnpm release
           createGithubReleases: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The docs deploy listens on workflow_dispatch, which is exempt from
+      # GitHub's suppression of workflow runs for GITHUB_TOKEN-created events.
+      - name: Deploy docs
+        if: steps.changesets.outputs.published == 'true'
+        run: gh workflow run docs.yml --ref main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

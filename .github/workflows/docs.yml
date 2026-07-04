@@ -49,6 +49,26 @@ jobs:
 
       - run: pnpm docs:build
 
-      # Deploy is intentionally held until the 0.1.0 tag lands. The build above
-      # is enough to gate every PR on a green docs build; the upload-pages and
-      # deploy-pages steps will be enabled in the same commit that cuts 0.1.0.
+      # Deploys only run via workflow_dispatch, fired from release.yml after a
+      # real publish. A `release: published` trigger would never fire: the
+      # changesets action creates releases with GITHUB_TOKEN, and GitHub
+      # suppresses workflow runs for GITHUB_TOKEN events; workflow_dispatch is
+      # exempt. Pushes and PRs only build.
+      - uses: actions/upload-pages-artifact@v5
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          path: apps/docs/dist
+
+  deploy:
+    needs: build
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

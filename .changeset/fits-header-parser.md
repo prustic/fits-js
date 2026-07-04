@@ -2,4 +2,10 @@
 "@fits-js/core": minor
 ---
 
-Add FITS header parsing. `parseHeader` reads a header from a buffer into a `FitsHeader` with typed values (logical, integer, float including the Fortran D exponent, complex, string), resolves the CONTINUE long-string and HIERARCH conventions, and offers lenient (default, recovers and reports on a warnings channel) or strict (rejects standard violations) modes. Parsing of real archive headers is cross-checked against astropy.
+Header parsing:
+
+- `parseHeader(bytes)`: fixed and free-format cards into a `FitsHeader`, reporting `byteLength`, `endFound`, and recovered violations on `warnings`
+- Typed values: logical, integer, float including the Fortran `D` exponent, complex, string with quote escaping
+- `CONTINUE` long strings and `HIERARCH` keywords including the ESO dialect
+- `FitsHeader` accessors `get`, `getAll`, `getString`, `getNumber`, `getBoolean`, `comments`, `history`; big integers come back exact as `bigint`
+- Lenient by default, matching astropy tolerance on real archive headers; `{ strict: true }` rejects standard violations
