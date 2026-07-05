@@ -1,4 +1,4 @@
-import { FitsIoError, FitsStructureError } from "../errors.js";
+import { FitsIoError, FitsStructureError, FitsUnsupportedError } from "../errors.js";
 import type { FitsHeader } from "../header/header.js";
 import type { Hdu } from "../hdu/hdu.js";
 import type { RandomAccessReader } from "../io/reader.js";
@@ -312,6 +312,8 @@ function checkRegion(region: ImageRegion, axes: number[], hduIndex: number): voi
  * @throws {@link FitsStructureError} if the HDU is not an image, the
  * structural keywords or `region` are invalid, or the data unit is
  * truncated (fewer bytes available than the header declares).
+ * @throws {@link FitsUnsupportedError} if the HDU is a tile-compressed
+ * image (`ZIMAGE = T`), which this library does not decode yet.
  *
  * @example
  * ```ts
@@ -335,6 +337,16 @@ export async function readImage(
   }
 
   if (hdu.type !== "primary" && hdu.type !== "image") {
+    // A tile-compressed image is structurally a BINTABLE (ZIMAGE = T); it is
+    // a valid image this library does not decode yet, not a wrong HDU.
+    if (hdu.header.getBoolean("ZIMAGE") === true) {
+      const algorithm = hdu.header.getString("ZCMPTYPE") ?? "unknown algorithm";
+      throw new FitsUnsupportedError(
+        `HDU ${hdu.index} is a tile-compressed image (${algorithm}); compressed images are not supported yet`,
+        { hduIndex: hdu.index },
+      );
+    }
+
     throw new FitsStructureError(`HDU ${hdu.index} is not an image (type ${hdu.type})`, {
       hduIndex: hdu.index,
     });
