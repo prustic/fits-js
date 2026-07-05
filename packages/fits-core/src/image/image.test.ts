@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { FitsIoError, FitsStructureError } from "../errors.js";
+import { FitsIoError, FitsStructureError, FitsUnsupportedError } from "../errors.js";
 import { BytesReader, type RandomAccessReader } from "../io/reader.js";
 import { readHdus } from "../hdu/read-hdus.js";
 import { parseHeader } from "../header/parse-header.js";
@@ -443,5 +443,73 @@ test("an aborted signal cancels the read", async () => {
     () => readImage(hdu, reader, { signal: ac.signal }),
     (e: unknown) =>
       e instanceof Error && !(e instanceof FitsStructureError) && e.name === "AbortError",
+  );
+});
+
+test("a tile-compressed image rejects as unsupported, naming the algorithm", async () => {
+  const primary = fits(
+    ["SIMPLE  =                    T", card("BITPIX", 8), card("NAXIS", 0)],
+    new Uint8Array(0),
+  );
+  const ext = fits(
+    [
+      "XTENSION= 'BINTABLE'",
+      card("BITPIX", 8),
+      card("NAXIS", 2),
+      card("NAXIS1", 8),
+      card("NAXIS2", 1),
+      card("PCOUNT", 0),
+      card("GCOUNT", 1),
+      card("TFIELDS", 1),
+      "TFORM1  = '1PB(8)  '",
+      card("ZIMAGE", true),
+      "ZCMPTYPE= 'RICE_1  '",
+      card("ZBITPIX", 16),
+      card("ZNAXIS", 2),
+      card("ZNAXIS1", 4),
+      card("ZNAXIS2", 2),
+    ],
+    new Uint8Array(8),
+  );
+  const buf = new Uint8Array(primary.length + ext.length);
+  buf.set(primary, 0);
+  buf.set(ext, primary.length);
+
+  const { hdus } = readHdus(buf);
+  assert.equal(hdus[1].type, "bintable");
+  await assert.rejects(
+    () => readImage(hdus[1], new BytesReader(buf)),
+    (e: unknown) =>
+      e instanceof FitsUnsupportedError && e.hduIndex === 1 && e.message.includes("RICE_1"),
+  );
+});
+
+test("a plain bintable still rejects as not an image", async () => {
+  const primary = fits(
+    ["SIMPLE  =                    T", card("BITPIX", 8), card("NAXIS", 0)],
+    new Uint8Array(0),
+  );
+  const ext = fits(
+    [
+      "XTENSION= 'BINTABLE'",
+      card("BITPIX", 8),
+      card("NAXIS", 2),
+      card("NAXIS1", 8),
+      card("NAXIS2", 1),
+      card("PCOUNT", 0),
+      card("GCOUNT", 1),
+      card("TFIELDS", 1),
+      "TFORM1  = '8B      '",
+    ],
+    new Uint8Array(8),
+  );
+  const buf = new Uint8Array(primary.length + ext.length);
+  buf.set(primary, 0);
+  buf.set(ext, primary.length);
+
+  const { hdus } = readHdus(buf);
+  await assert.rejects(
+    () => readImage(hdus[1], new BytesReader(buf)),
+    (e: unknown) => e instanceof FitsStructureError && e.message.includes("not an image"),
   );
 });
