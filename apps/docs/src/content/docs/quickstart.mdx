@@ -77,9 +77,12 @@ const { data } = await readImage(primary, reader, { region });
 ```
 
 `HttpRangeReader` issues HTTP `Range` requests for the bytes `openFits` and
-`readImage` ask for, and nothing else. A 1.2 MB file with five image
-extensions costs about 55 KB to enumerate and 64 bytes for the 8x2 Float32
-cutout above.
+`readImage` ask for, and fetches are page-granular. Measured on a 1.2 MB
+archive file with five image extensions, enumeration costs about 320 KB at
+the default 64 KiB `pageSize`, and an 8x8 cutout from the first extension
+then costs nothing more, because its bytes land in pages the enumeration
+already cached. A smaller `pageSize` trades more requests for fewer bytes.
+The [HTTP guide](/fits-js/guides/reading-over-http/) covers the tuning.
 
 If the server answers the initial `bytes=0-0` probe with `200` (ignoring the
 range), the reader falls back to fetching the whole body once and serving
@@ -116,7 +119,7 @@ None of the snippets above ever read more than they need.
   spans.
 - Reading without a `region` returns the full image.
 
-A 4 GB cube with a tiny region cutout still costs only a few kilobytes of
-network or disk, which is the point. See
+A 4 GB cube with a tiny region cutout still costs kilobytes, not
+gigabytes, which is the point. See
 [`examples/http-range`](https://github.com/prustic/fits-js/tree/main/examples/http-range)
 for a complete program that prints the byte counts.
