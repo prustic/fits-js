@@ -26,11 +26,11 @@ import {
 - `FitsStructureError` covers HDUs whose structural keywords are out of
   domain or inconsistent (negative `NAXIS`, mismatched `TFIELDS`, random
   groups). Carries `hduIndex`.
-- `FitsUnsupportedError` covers features that are recognized but not
-  implemented, such as tile-compressed data and ASCII table decode.
-  Carries `hduIndex`.
-- `FitsIoError` covers filesystem failures, HTTP failures, abort signals,
-  and out-of-range reads. Carries `url`, `status`, and/or `offset` when
+- `FitsUnsupportedError` covers recognized FITS constructs this library
+  does not decode, such as tile-compressed images and the random-groups
+  format. Carries `hduIndex`.
+- `FitsIoError` covers filesystem failures, HTTP failures, and
+  out-of-range reads. Carries `url`, `status`, and/or `offset` when
   relevant.
 
 ## Branching on cause
@@ -58,7 +58,8 @@ try {
 alongside the HDUs. The library prefers degrading to a warning when the
 file is recoverable. A missing `END` near the file end, a non-conforming
 value with a plausible coercion, a truncated data unit. Pass `{ strict:
-true }` to escalate every warning to a throw.
+true }` to escalate standard violations to a throw. Advisory warnings,
+such as `SIMPLE = F`, stay warnings in strict mode.
 
 ```ts
 const { hdus, warnings } = await openFits(reader);
@@ -68,8 +69,9 @@ for (const w of warnings) console.warn(w);
 ## Aborting
 
 The readers and the enumerator accept an `AbortSignal`. Cancelling
-rejects the in-flight read with a `FitsIoError` whose `cause` is the
-abort reason.
+rejects the in-flight read with the signal's reason itself, not a
+`FitsIoError`, so the `DOMException` from `AbortSignal.timeout()` or your
+own abort reason propagates intact.
 
 ```ts
 const controller = new AbortController();
