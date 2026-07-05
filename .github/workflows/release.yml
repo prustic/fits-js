@@ -40,6 +40,11 @@ jobs:
           createGithubReleases: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Fallback for first publishes only: a new package cannot use trusted
+          # publishing (no package settings page exists to attach it to), so
+          # the NPM_TOKEN secret exists just for the bootstrap window and is
+          # deleted after. npm tries OIDC first; this line is inert otherwise.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # Dispatch, not `release: published`: GITHUB_TOKEN-created events
       # don't trigger workflows.
