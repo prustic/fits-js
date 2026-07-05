@@ -9,4 +9,5 @@
 - Unscaled integer images stay integer with `BLANK` exposed as `blank`, a documented deviation from astropy
 - N-dimensional cubes; a `{ region }` rectangular cutout fetches only the bytes the region spans
 - `{ raw: true }` returns the on-disk array; an `AbortSignal` cancels the read
+- Tile-compressed images (`ZIMAGE = T`) reject with `FitsUnsupportedError` naming the algorithm, not a malformed-file error
 - Adds the `FitsImage`, `ImageArray`, `ImageRegion`, and `ReadImageOptions` types
