@@ -40,6 +40,11 @@ jobs:
           createGithubReleases: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # First publish of a package: no trusted publisher exists yet, so it
+          # falls back to the token. Inert once OIDC is configured.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # Provenance signs via OIDC regardless of registry auth. Public repo only.
+          NPM_CONFIG_PROVENANCE: true
 
       # Dispatch, not `release: published`: GITHUB_TOKEN-created events
       # don't trigger workflows.
