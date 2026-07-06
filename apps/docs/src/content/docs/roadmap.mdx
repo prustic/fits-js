@@ -8,7 +8,7 @@ import Mermaid from "../../components/Mermaid.astro";
 <Mermaid
   code={`
 timeline TD
-  0.1.0 · 5 Jul 2026 : Core read path
+  0.1.0 · 6 Jul 2026 : Core read path
                    : Header parsing, HDU enumeration
                    : Four readers, image data with cutouts
   0.2.0 : Tables and Arrow
@@ -37,7 +37,7 @@ timeline TD
 
 See the [Changelog](/fits-js/changelog/) for full details on each release.
 
-- **[0.1.0](/fits-js/changelog/#010)** · 5 July 2026 · core read path: header parsing, HDU enumeration, four readers, image decode with lazy cutouts
+- **[0.1.0](/fits-js/changelog/#010)** · 6 July 2026 · core read path: header parsing, HDU enumeration, four readers, image decode with lazy cutouts
 
 ### 0.1.0 · Core read path
 
@@ -122,8 +122,8 @@ proven-identical cross-runtime story.
 
 - `DATASUM` and `CHECKSUM` verification.
 - Structural conformance check at `fitsverify` level.
-- Strict vs lenient parse modes, default lenient with a `warnings`
-  channel.
+- The strict vs lenient contract formalized as a conformance guarantee
+  (both modes exist since 0.1.0).
 - Full CI matrix: Node 22/24, Bun, Deno, Workers, headless browser.
 
 ### Beyond 0.7.0

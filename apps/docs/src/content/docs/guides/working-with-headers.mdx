@@ -39,9 +39,12 @@ are assembled into a single string by the parser. Long keywords using the
 keyword text.
 
 ```ts
-const longName = hdu.header.getString("HIERARCH ESO INS PIPE DETECT");
+const longName = hdu.header.getString("ESO INS PIPE DETECT");
 const longText = hdu.header.getString("FILENAME"); // CONTINUE-assembled
 ```
+
+Lookups use the bare hierarchical name. The `HIERARCH` prefix marks the
+convention on the card and is not part of the stored keyword.
 
 ## `COMMENT` and `HISTORY`
 
