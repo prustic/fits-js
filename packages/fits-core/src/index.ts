@@ -17,6 +17,14 @@ export {
   type ImageRegion,
   type ReadImageOptions,
 } from "./image/image.js";
+export { type ColumnTypeCode, type ParsedTform, type TableColumn } from "./table/columns.js";
+export {
+  readTable,
+  type FitsTable,
+  type ReadTableOptions,
+  type TableColumnArray,
+  type TableColumnData,
+} from "./table/table.js";
 export {
   isFitsComplex,
   type FitsComplex,
