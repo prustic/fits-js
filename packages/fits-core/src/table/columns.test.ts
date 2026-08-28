@@ -210,6 +210,20 @@ test("a zero TSCAL is applied but flagged", () => {
   assert.match(warnings[0], /TSCAL1 is 0; every scaled value collapses to TZERO/);
 });
 
+test("non-numeric TSCAL and TZERO are ignored with a warning", () => {
+  const { columns: cols, warnings } = columns([
+    "TFIELDS =                    1",
+    "TFORM1  = '1I'",
+    "TSCAL1  = '0.001'",
+    "TZERO1  = T",
+  ]);
+  assert.equal(cols[0].tscal, 1);
+  assert.equal(cols[0].tzero, 0);
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /TSCAL1 "0.001" is not a number; ignored/);
+  assert.match(warnings[1], /TZERO1 true is not a number; ignored/);
+});
+
 test("non-integer TNULL is ignored with a warning", () => {
   const { columns: cols, warnings } = columns([
     "TFIELDS =                    1",

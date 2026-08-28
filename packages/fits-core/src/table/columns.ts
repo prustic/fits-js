@@ -284,6 +284,8 @@ export function readTableColumns(header: FitsHeader, hduIndex: number): TableCol
       } else if (Number(tscalRaw) !== 1) {
         warn(`TSCAL${n} does not apply to a ${tform.code} column; ignored`);
       }
+    } else if (tscalRaw !== undefined) {
+      warn(`TSCAL${n} ${JSON.stringify(tscalRaw)} is not a number; ignored`);
     }
 
     let tzero = 0;
@@ -296,6 +298,8 @@ export function readTableColumns(header: FitsHeader, hduIndex: number): TableCol
       } else if (Number(tzeroRaw) !== 0) {
         warn(`TZERO${n} does not apply to a ${tform.code} column; ignored`);
       }
+    } else if (tzeroRaw !== undefined) {
+      warn(`TZERO${n} ${JSON.stringify(tzeroRaw)} is not a number; ignored`);
     }
 
     // TNULL applies to integer stored values only (§7.3.2); a varlen
