@@ -6,7 +6,7 @@ packages:
   - "apps/*"
 
 catalog:
-  "@types/node": ^26.2.0
+  "@types/node": ^26.3.0
   typescript: ^5.9.3
   prettier: ^3.8.1
   eslint: ^10.1.0
