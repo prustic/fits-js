@@ -139,8 +139,12 @@ interface BaseState {
   mask?: Uint8Array;
   /** Total slots, for lazy mask allocation. */
   elemCount: number;
-  /** An `L` column saw a byte outside `T`/`F`/0x00. */
-  badLogical: boolean;
+  /**
+   * First byte an `L` column saw outside `T`/`F`/0x00. Named in the
+   * warning because writers do produce them: astropy stores 0x01/0x00 in a
+   * variable-length logical heap, which the standard does not allow.
+   */
+  badLogicalByte?: number;
 }
 
 interface FixedState extends BaseState {
@@ -206,14 +210,13 @@ function makeState(column: TableColumn, rowCount: number): ColumnState {
       offsets: new Int32Array(rowCount + 1),
       values: allocValues(elementCode!, 0, 0),
       elemCount: 0,
-      badLogical: false,
     };
   }
 
   const n = rowCount * repeat;
   const values = allocValues(code, code === "C" || code === "M" ? 2 * n : n, rowCount);
 
-  return { kind: "fixed", column, values, elemCount: values.length, badLogical: false };
+  return { kind: "fixed", column, values, elemCount: values.length };
 }
 
 /** @internal Set one mask bit, allocating the mask on first use. */
@@ -260,7 +263,7 @@ function decodeColumnSlab(
             // 0x00 is the undefined logical; other bytes are violations.
             o[out + k] = 0;
             setMask(state, out + k);
-            if (b !== 0x00) state.badLogical = true;
+            if (b !== 0x00 && state.badLogicalByte === undefined) state.badLogicalByte = b;
           }
         }
       }
@@ -449,7 +452,7 @@ function decodeHeapArray(
         } else {
           o[slot + k] = 0;
           setMask(state, slot + k);
-          if (b !== 0x00) state.badLogical = true;
+          if (b !== 0x00 && state.badLogicalByte === undefined) state.badLogicalByte = b;
         }
       }
       break;
@@ -578,8 +581,10 @@ function unsignedView(state: ColumnState): TableColumnArray | undefined {
  * @internal Validate every descriptor, size the outputs, then read the heap
  * once in forward order. Sorting the references by heap offset is what
  * FITS v4.0 §7.3.6 prescribes for sequential media: each window starts at a
- * referenced array, so unreferenced gaps and unselected columns are never
- * fetched, and the reads stay monotone for a paging reader.
+ * referenced array, so unselected columns and any run of unreferenced bytes
+ * between windows are never fetched, and the reads stay monotone for a
+ * paging reader. A small gap between two arrays inside one window is read
+ * along with them, which is the cheaper trade.
  */
 async function gatherHeap(
   states: readonly VarlenState[],
@@ -610,7 +615,9 @@ async function gatherHeap(
 
     state.offsets = plan!.offsets;
     state.values = allocValues(state.elementCode, plan!.total, state.counts.length);
-    state.elemCount = plan!.total;
+    // Sized by the output, not the element total: an A column holds one
+    // string per row, so a mask over it would be rowCount, not plan.total.
+    state.elemCount = state.values.length;
 
     if (plan!.overMaxRow !== undefined) {
       const row = plan!.overMaxRow;
@@ -893,8 +900,11 @@ export async function readTable(
   }
 
   const columns: TableColumnData[] = states.map((state) => {
-    if (state.badLogical) {
-      warnings.push(`${label(state.column)}: logical bytes outside T/F/0x00 decoded as undefined`);
+    if (state.badLogicalByte !== undefined) {
+      const seen = `0x${state.badLogicalByte.toString(16).padStart(2, "0")}`;
+      warnings.push(
+        `${label(state.column)}: logical bytes outside T/F/0x00 decoded as undefined (first saw ${seen})`,
+      );
     }
 
     return {

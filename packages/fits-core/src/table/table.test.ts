@@ -627,6 +627,22 @@ test("a heap logical column masks undefined bytes and flags junk", async () => {
   assert.ok(t.warnings.some((w) => /logical bytes outside T\/F\/0x00/.test(w)));
 });
 
+test("an astropy-written logical heap is refused by value and named", async () => {
+  // astropy 6 writes 0x01/0x00 into a variable-length logical heap, which
+  // the standard does not allow (7.3.3 permits only T, F and 0x00). Those
+  // bytes decode as undefined rather than as true, and the warning names
+  // the byte so the cause is obvious from the message alone.
+  const { hdu, reader } = heapTable(
+    [card("NAXIS1", 8), card("NAXIS2", 1), card("TFIELDS", 1), "TFORM1  = '1PL'"],
+    desc32(4, 0),
+    Uint8Array.of(0x01, 0x00, 0x01, 0x00),
+  );
+  const t = await readTable(hdu, reader);
+  assert.deepEqual([...(t.columns[0].values as Uint8Array)], [0, 0, 0, 0]);
+  assert.deepEqual([...(t.columns[0].mask as Uint8Array)], [1, 1, 1, 1]);
+  assert.ok(t.warnings.some((w) => /first saw 0x01/.test(w)));
+});
+
 test("a heap bit column counts bits and drops the trailing pad", async () => {
   // 12 bits occupy 2 bytes; the last 4 bits of the second byte are padding
   // (FITS v4.0 7.3.3). Asserted against the standard alone: astropy rejects
