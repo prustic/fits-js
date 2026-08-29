@@ -218,6 +218,20 @@ function tformWidth(tform: ParsedTform): number {
   return ELEMENT_BYTES[tform.code] * tform.repeat;
 }
 
+/**
+ * @internal Heap bytes a variable-length array of `count` elements occupies.
+ * An `X` descriptor counts bits, and a bit array is stored as whole bytes
+ * with the trailing bits zeroed (FITS v4.0 §7.3.3).
+ */
+export function heapArrayBytes(
+  elementCode: Exclude<ColumnTypeCode, "P" | "Q">,
+  count: number,
+): number {
+  if (elementCode === "X") return Math.ceil(count / 8);
+
+  return ELEMENT_BYTES[elementCode] * count;
+}
+
 /** @internal The result of assembling a BINTABLE's column keyword model. */
 export interface TableColumnsResult {
   columns: TableColumn[];
@@ -271,8 +285,11 @@ export function readTableColumns(header: FitsHeader, hduIndex: number): TableCol
       seenNames.add(key);
     }
 
+    // P/Q are storage classes, so every per-type rule keys off the element.
+    const elementType = tform.elementCode ?? tform.code;
+
     // TSCAL/TZERO must not be used with L, X, or A columns (§7.3.2).
-    const scalable = tform.code !== "L" && tform.code !== "X" && tform.code !== "A";
+    const scalable = elementType !== "L" && elementType !== "X" && elementType !== "A";
     let tscal = 1;
     const tscalRaw = header.get(`TSCAL${n}`);
     if (typeof tscalRaw === "number" || typeof tscalRaw === "bigint") {
@@ -282,7 +299,7 @@ export function readTableColumns(header: FitsHeader, hduIndex: number): TableCol
           warn(`TSCAL${n} is 0; every scaled value collapses to TZERO`);
         }
       } else if (Number(tscalRaw) !== 1) {
-        warn(`TSCAL${n} does not apply to a ${tform.code} column; ignored`);
+        warn(`TSCAL${n} does not apply to a ${elementType} column; ignored`);
       }
     } else if (tscalRaw !== undefined) {
       warn(`TSCAL${n} ${JSON.stringify(tscalRaw)} is not a number; ignored`);
@@ -296,21 +313,19 @@ export function readTableColumns(header: FitsHeader, hduIndex: number): TableCol
         tzero = Number(tzeroRaw);
         if (typeof tzeroRaw === "bigint") tzeroBig = tzeroRaw;
       } else if (Number(tzeroRaw) !== 0) {
-        warn(`TZERO${n} does not apply to a ${tform.code} column; ignored`);
+        warn(`TZERO${n} does not apply to a ${elementType} column; ignored`);
       }
     } else if (tzeroRaw !== undefined) {
       warn(`TZERO${n} ${JSON.stringify(tzeroRaw)} is not a number; ignored`);
     }
 
-    // TNULL applies to integer stored values only (§7.3.2); a varlen
-    // column nulls by its element type.
+    // TNULL applies to integer stored values only (§7.3.2).
     let tnull: number | undefined;
     let tnullBig: bigint | undefined;
     const tnullRaw = header.get(`TNULL${n}`);
     if (tnullRaw !== undefined) {
-      const elementType = tform.elementCode ?? tform.code;
       if (!INTEGER_CODES.has(elementType)) {
-        warn(`TNULL${n} does not apply to a ${tform.code} column; ignored`);
+        warn(`TNULL${n} does not apply to a ${elementType} column; ignored`);
       } else if (typeof tnullRaw === "bigint") {
         tnullBig = tnullRaw;
         tnull = Number(tnullRaw);

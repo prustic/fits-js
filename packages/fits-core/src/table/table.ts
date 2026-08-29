@@ -1,13 +1,21 @@
 import { FitsIoError, FitsStructureError, FitsUnsupportedError } from "../errors.js";
 import type { Hdu } from "../hdu/hdu.js";
 import type { RandomAccessReader } from "../io/reader.js";
-import { readTableColumns, type TableColumn } from "./columns.js";
+import {
+  heapArrayBytes,
+  readTableColumns,
+  type ColumnTypeCode,
+  type TableColumn,
+} from "./columns.js";
+import { heapGeometry, nextHeapWindow, planGather, type HeapGeometry } from "./heap.js";
 
 /**
  * Every array kind a decoded column can hold. Numeric columns come back as
  * the typed array matching their {@link ColumnTypeCode}; `A` columns come
  * back as one `string` per row. `L` and `X` columns decode to a
- * `Uint8Array` of `0`/`1` values, one element per logical or per bit.
+ * `Uint8Array` of `0`/`1` values, one element per logical or per bit. A
+ * variable-length column holds every row's array concatenated, split by
+ * {@link TableColumnData.offsets}.
  */
 export type TableColumnArray =
   | Uint8Array
@@ -25,8 +33,10 @@ export type TableColumnArray =
 /**
  * One decoded column: its keyword model plus the values, flat and
  * column-major with `repeat` elements per row (`2 * repeat` floats for the
- * complex types, one string per row for `A`). A `TDIMn` cell shape is
- * metadata on {@link TableColumn.tdim}; the data stays flat either way.
+ * complex types, one string per row for `A`), or, for a variable-length
+ * column, every row's array concatenated with `offsets` marking the row
+ * boundaries. A `TDIMn` cell shape is metadata on
+ * {@link TableColumn.tdim}; the data stays flat either way.
  *
  * An `A` string ends at the first NUL byte, like CFITSIO (astropy keeps
  * the bytes after it), and sheds insignificant trailing spaces.
@@ -43,6 +53,21 @@ export interface TableColumnData {
    * never masked; their undefined value is `NaN` in `values`.
    */
   readonly mask?: Uint8Array;
+  /**
+   * Row boundaries into `values` for a variable-length array column
+   * (`TFORMn` `rPt` or `rQt`): row `i` is
+   * `values.subarray(offsets[i], offsets[i + 1])`. Length is `rowCount + 1`
+   * with `offsets[0]` of `0` and a last entry of `values.length`, the Arrow
+   * `List` convention.
+   *
+   * Absent for fixed-width columns, and for a variable-length `A` column,
+   * whose `values` already holds one string per row.
+   *
+   * Indices count slots of `values`, not logical elements: a `C` or `M`
+   * element spans two slots and an `X` element is one slot per bit. A
+   * zero-length row is an empty range, never a null one.
+   */
+  readonly offsets?: Int32Array;
 }
 
 /**
@@ -78,11 +103,16 @@ export interface ReadTableOptions {
   /**
    * Columns to decode, by `TTYPEn` name (case-insensitive; a duplicate name
    * resolves to its first column) or zero-based index. All columns when
-   * omitted. Whole rows are fetched regardless, so a projection saves
-   * memory and decode time, not I/O.
+   * omitted. Whole rows are fetched regardless, so a projection over
+   * fixed-width columns saves memory and decode time, not I/O; for a
+   * variable-length column it also saves I/O, since only a selected
+   * column's heap arrays are fetched.
    */
   columns?: readonly (string | number)[];
-  /** A contiguous row range to decode; the whole table when omitted. */
+  /**
+   * A contiguous row range to decode; the whole table when omitted. Only
+   * the bytes that range spans are fetched, heap arrays included.
+   */
   rows?: { readonly start: number; readonly count: number };
   /**
    * Return on-disk values without applying `TSCALn`/`TZEROn` or the
@@ -90,9 +120,9 @@ export interface ReadTableOptions {
    */
   raw?: boolean;
   /**
-   * Cancels the read. Rows are fetched in slabs; the signal is checked
-   * before each, so an abort takes effect promptly and rejects with the
-   * signal's reason.
+   * Cancels the read. Rows are fetched in slabs and heap arrays in
+   * windows; the signal is checked before each, so an abort takes effect
+   * promptly and rejects with the signal's reason.
    */
   signal?: AbortSignal;
 }
@@ -102,60 +132,92 @@ const latin1 = new TextDecoder("latin1");
 /** @internal Rows are fetched in slabs of at most this many bytes. */
 const SLAB_BYTES = 8 * 1024 * 1024;
 
-/** @internal Decode state for one selected column. */
-interface ColumnState {
+/** @internal Fields shared by both storage classes. */
+interface BaseState {
   column: TableColumn;
   values: TableColumnArray;
   mask?: Uint8Array;
-  /** Total elements, for lazy mask allocation. */
+  /** Total slots, for lazy mask allocation. */
   elemCount: number;
   /** An `L` column saw a byte outside `T`/`F`/0x00. */
   badLogical: boolean;
 }
 
-/** @internal Allocate the output array for a column over `rowCount` rows. */
-function makeState(column: TableColumn, rowCount: number): ColumnState {
-  const r = column.tform.repeat;
-  const n = rowCount * r;
+interface FixedState extends BaseState {
+  kind: "fixed";
+}
 
-  let values: TableColumnArray;
-  switch (column.tform.code) {
+/**
+ * @internal A `P`/`Q` column. The row pass fills the descriptors; `offsets`,
+ * `values` and `elemCount` are set once every descriptor is known.
+ */
+interface VarlenState extends BaseState {
+  kind: "varlen";
+  elementCode: Exclude<ColumnTypeCode, "P" | "Q">;
+  counts: Float64Array;
+  heapOffsets: Float64Array;
+  offsets: Int32Array;
+  overMaxRow?: number;
+}
+
+type ColumnState = FixedState | VarlenState;
+
+/** @internal Allocate `slots` values of `code`; `A` holds one string per row. */
+function allocValues(
+  code: Exclude<ColumnTypeCode, "P" | "Q">,
+  slots: number,
+  rows: number,
+): TableColumnArray {
+  switch (code) {
     case "L":
     case "X":
     case "B":
-      values = new Uint8Array(n);
-      break;
+      return new Uint8Array(slots);
     case "I":
-      values = new Int16Array(n);
-      break;
+      return new Int16Array(slots);
     case "J":
-      values = new Int32Array(n);
-      break;
+      return new Int32Array(slots);
     case "K":
-      values = new BigInt64Array(n);
-      break;
+      return new BigInt64Array(slots);
     case "A":
-      values = new Array<string>(rowCount).fill("");
-      break;
+      return new Array<string>(rows).fill("");
     case "E":
-      values = new Float32Array(n);
-      break;
+      return new Float32Array(slots);
     case "D":
-      values = new Float64Array(n);
-      break;
+      return new Float64Array(slots);
     case "C":
-      values = new Float32Array(2 * n);
-      break;
+      return new Float32Array(slots);
     default: // M
-      values = new Float64Array(2 * n);
-      break;
+      return new Float64Array(slots);
+  }
+}
+
+/** @internal Allocate the decode state for a column over `rowCount` rows. */
+function makeState(column: TableColumn, rowCount: number): ColumnState {
+  const { code, repeat, elementCode } = column.tform;
+
+  if (code === "P" || code === "Q") {
+    return {
+      kind: "varlen",
+      column,
+      elementCode: elementCode!,
+      counts: new Float64Array(rowCount),
+      heapOffsets: new Float64Array(rowCount),
+      offsets: new Int32Array(rowCount + 1),
+      values: allocValues(elementCode!, 0, 0),
+      elemCount: 0,
+      badLogical: false,
+    };
   }
 
-  return { column, values, elemCount: values.length, badLogical: false };
+  const n = rowCount * repeat;
+  const values = allocValues(code, code === "C" || code === "M" ? 2 * n : n, rowCount);
+
+  return { kind: "fixed", column, values, elemCount: values.length, badLogical: false };
 }
 
 /** @internal Set one mask bit, allocating the mask on first use. */
-function setMask(state: ColumnState, elem: number): void {
+function setMask(state: BaseState, elem: number): void {
   if (state.mask === undefined) {
     state.mask = new Uint8Array(state.elemCount);
   }
@@ -163,12 +225,13 @@ function setMask(state: ColumnState, elem: number): void {
 }
 
 /**
- * @internal Decode one column's fields from a slab of `slabRows` whole rows
- * into the state's output at row `outRow0`. Always copies; the slab buffer
- * is never retained.
+ * @internal Decode one fixed-width column's fields from a slab of
+ * `slabRows` whole rows into the state's output at row `outRow0`. Always
+ * copies; the slab buffer is never retained. Row-strided twin of
+ * {@link decodeHeapArray}; keep the two element rules in sync.
  */
 function decodeColumnSlab(
-  state: ColumnState,
+  state: FixedState,
   bytes: Uint8Array,
   view: DataView,
   slabRows: number,
@@ -325,6 +388,154 @@ function decodeColumnSlab(
 }
 
 /**
+ * @internal Capture one slab of `P`/`Q` descriptors. The array data itself
+ * lives in the heap and is gathered after every descriptor is known.
+ */
+function decodeDescriptorSlab(
+  state: VarlenState,
+  view: DataView,
+  slabRows: number,
+  rowStride: number,
+  outRow0: number,
+): void {
+  // A zero repeat is a zero-byte field (§7.3.3.1); there is nothing to read
+  // and every row stays an empty array.
+  if (state.column.tform.repeat === 0) return;
+
+  const off = state.column.byteOffset;
+  const wide = state.column.tform.code === "Q";
+
+  for (let row = 0; row < slabRows; row++) {
+    const base = row * rowStride + off;
+    if (wide) {
+      // Magnitudes the heap cannot contain are refused when the gather is
+      // planned, so narrowing here never loses a value that gets used.
+      state.counts[outRow0 + row] = Number(view.getBigInt64(base, false));
+      state.heapOffsets[outRow0 + row] = Number(view.getBigInt64(base + 8, false));
+    } else {
+      state.counts[outRow0 + row] = view.getInt32(base, false);
+      state.heapOffsets[outRow0 + row] = view.getInt32(base + 4, false);
+    }
+  }
+}
+
+/**
+ * @internal Decode one variable-length array from resident heap bytes into
+ * the gathered output. `at` is the array's offset within `bytes`, `slot` its
+ * first output slot. Contiguous twin of {@link decodeColumnSlab}; keep the
+ * two element rules in sync.
+ */
+function decodeHeapArray(
+  state: VarlenState,
+  bytes: Uint8Array,
+  view: DataView,
+  at: number,
+  row: number,
+  count: number,
+): void {
+  const slot = state.offsets[row];
+  const tnull = state.column.tnull;
+  const tnullBig = state.column.tnullBig ?? (tnull !== undefined ? BigInt(tnull) : undefined);
+
+  switch (state.elementCode) {
+    case "L": {
+      const o = state.values as Uint8Array;
+      for (let k = 0; k < count; k++) {
+        const b = bytes[at + k];
+        if (b === 0x54) {
+          o[slot + k] = 1;
+        } else if (b === 0x46) {
+          o[slot + k] = 0;
+        } else {
+          o[slot + k] = 0;
+          setMask(state, slot + k);
+          if (b !== 0x00) state.badLogical = true;
+        }
+      }
+      break;
+    }
+    case "X": {
+      // The count is in bits, packed MSB-first into whole bytes.
+      const o = state.values as Uint8Array;
+      for (let k = 0; k < count; k++) {
+        o[slot + k] = (bytes[at + (k >> 3)] >> (7 - (k & 7))) & 1;
+      }
+      break;
+    }
+    case "B": {
+      const o = state.values as Uint8Array;
+      for (let k = 0; k < count; k++) {
+        const v = bytes[at + k];
+        o[slot + k] = v;
+        if (v === tnull) setMask(state, slot + k);
+      }
+      break;
+    }
+    case "I": {
+      const o = state.values as Int16Array;
+      for (let k = 0; k < count; k++) {
+        const v = view.getInt16(at + 2 * k, false);
+        o[slot + k] = v;
+        if (v === tnull) setMask(state, slot + k);
+      }
+      break;
+    }
+    case "J": {
+      const o = state.values as Int32Array;
+      for (let k = 0; k < count; k++) {
+        const v = view.getInt32(at + 4 * k, false);
+        o[slot + k] = v;
+        if (v === tnull) setMask(state, slot + k);
+      }
+      break;
+    }
+    case "K": {
+      const o = state.values as BigInt64Array;
+      for (let k = 0; k < count; k++) {
+        const v = view.getBigInt64(at + 8 * k, false);
+        o[slot + k] = v;
+        if (v === tnullBig) setMask(state, slot + k);
+      }
+      break;
+    }
+    case "A": {
+      const o = state.values as string[];
+      let len = 0;
+      while (len < count && bytes[at + len] !== 0x00) {
+        len++;
+      }
+      while (len > 0 && bytes[at + len - 1] === 0x20) {
+        len--;
+      }
+
+      o[row] = latin1.decode(bytes.subarray(at, at + len));
+      break;
+    }
+    case "E": {
+      const o = state.values as Float32Array;
+      for (let k = 0; k < count; k++) o[slot + k] = view.getFloat32(at + 4 * k, false);
+      break;
+    }
+    case "D": {
+      const o = state.values as Float64Array;
+      for (let k = 0; k < count; k++) o[slot + k] = view.getFloat64(at + 8 * k, false);
+      break;
+    }
+    case "C": {
+      const o = state.values as Float32Array;
+      for (let k = 0; k < 2 * count; k++) o[slot + k] = view.getFloat32(at + 4 * k, false);
+      break;
+    }
+    default: {
+      // M
+      const o = state.values as Float64Array;
+      for (let k = 0; k < 2 * count; k++) o[slot + k] = view.getFloat64(at + 8 * k, false);
+      break;
+    }
+  }
+}
+
+/**
  * @internal The unsigned/signed integer convention (`TSCALn=1`, `TZEROn` at
  * the half range); mirrors the image path's `unsignedView`. Returns
  * `undefined` if it does not apply.
@@ -333,7 +544,8 @@ function unsignedView(state: ColumnState): TableColumnArray | undefined {
   const { tscal, tzero, tzeroBig } = state.column;
   if (tscal !== 1) return undefined;
 
-  const code = state.column.tform.code;
+  // P/Q store their element type's values, so scaling keys off that.
+  const code = state.column.tform.elementCode ?? state.column.tform.code;
   if (code === "B" && tzero === -(2 ** 7)) {
     const u = state.values as Uint8Array;
     const out = new Int8Array(u.length);
@@ -362,9 +574,103 @@ function unsignedView(state: ColumnState): TableColumnArray | undefined {
   return undefined;
 }
 
+/**
+ * @internal Validate every descriptor, size the outputs, then read the heap
+ * once in forward order. Sorting the references by heap offset is what
+ * FITS v4.0 §7.3.6 prescribes for sequential media: each window starts at a
+ * referenced array, so unreferenced gaps and unselected columns are never
+ * fetched, and the reads stay monotone for a paging reader.
+ */
+async function gatherHeap(
+  states: readonly VarlenState[],
+  geometry: HeapGeometry,
+  reader: RandomAccessReader,
+  opts: ReadTableOptions,
+  fail: (msg: string) => never,
+  label: (column: TableColumn) => string,
+  warnings: string[],
+): Promise<void> {
+  // One reference per non-empty row, flattened across the selected columns.
+  const refStates: VarlenState[] = [];
+  const refRows: number[] = [];
+  const refOffsets: number[] = [];
+  const refBytes: number[] = [];
+
+  for (const state of states) {
+    const { plan, problem } = planGather(
+      state.counts,
+      state.heapOffsets,
+      state.elementCode,
+      geometry.length,
+      state.column.tform.maxCount,
+    );
+    if (problem !== undefined) {
+      fail(`${label(state.column)}: ${problem}`);
+    }
+
+    state.offsets = plan!.offsets;
+    state.values = allocValues(state.elementCode, plan!.total, state.counts.length);
+    state.elemCount = plan!.total;
+
+    if (plan!.overMaxRow !== undefined) {
+      const row = plan!.overMaxRow;
+      warnings.push(
+        `${label(state.column)}: row ${row} holds ${state.counts[row]} elements, more than the ${state.column.tform.maxCount} declared by TFORM; decoded anyway`,
+      );
+    }
+
+    for (let row = 0; row < state.counts.length; row++) {
+      const count = state.counts[row];
+      if (count === 0) continue;
+
+      refStates.push(state);
+      refRows.push(row);
+      refOffsets.push(state.heapOffsets[row]);
+      refBytes.push(heapArrayBytes(state.elementCode, count));
+    }
+  }
+
+  if (refStates.length === 0) return;
+
+  const heapOffsets = Float64Array.from(refOffsets);
+  const byteLengths = Float64Array.from(refBytes);
+
+  const order = new Uint32Array(refStates.length);
+  for (let i = 0; i < order.length; i++) order[i] = i;
+
+  // cfitsio writes the heap in row order, so check before paying for a sort.
+  let sorted = true;
+  for (let i = 1; i < order.length && sorted; i++) {
+    if (heapOffsets[i] < heapOffsets[i - 1]) sorted = false;
+  }
+  if (!sorted) order.sort((a, b) => heapOffsets[a] - heapOffsets[b]);
+
+  let from = 0;
+  while (from < order.length) {
+    opts.signal?.throwIfAborted();
+
+    const window = nextHeapWindow(order, heapOffsets, byteLengths, from, SLAB_BYTES);
+    const at = geometry.base + window.start;
+    const bytes = await reader.read(at, window.length);
+    if (bytes.length < window.length) {
+      fail(`heap data is truncated at byte ${at + bytes.length}`);
+    }
+
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    for (let i = from; i < window.end; i++) {
+      const ref = order[i];
+      const state = refStates[ref];
+      const row = refRows[ref];
+      decodeHeapArray(state, bytes, view, heapOffsets[ref] - window.start, row, state.counts[row]);
+    }
+
+    from = window.end;
+  }
+}
+
 /** @internal Apply the column scaling policy to a freshly decoded array. */
 function scaleColumn(state: ColumnState): TableColumnArray {
-  const code = state.column.tform.code;
+  const code = state.column.tform.elementCode ?? state.column.tform.code;
   if (code === "L" || code === "X" || code === "A") return state.values;
 
   const unsigned = unsignedView(state);
@@ -399,16 +705,17 @@ function scaleColumn(state: ColumnState): TableColumnArray {
  * {@link FitsTable} for the scaling policy and {@link TableColumnData} for
  * the null-mask contract.
  *
- * Variable-length array columns (`P`/`Q` descriptors) parse into the column
- * model but cannot be decoded yet; selecting one throws. Use a `columns`
- * projection to read the fixed-width columns of a table that contains them.
+ * A variable-length array column (`P`/`Q` descriptors) is gathered from
+ * the heap into the Arrow `List` layout described on
+ * {@link TableColumnData.offsets}. Only the arrays the selected columns and
+ * rows actually reference are fetched, in one forward pass over the heap.
  *
  * @throws {@link FitsStructureError} if the HDU is not a binary table, the
  * structural or column keywords are invalid, the `columns` or `rows`
- * options are out of range, or the data unit is truncated.
+ * options are out of range, a variable-length descriptor falls outside the
+ * heap, or the data unit is truncated.
  * @throws {@link FitsUnsupportedError} if the HDU is an ASCII table or a
- * tile-compressed image (`ZIMAGE = T`), or a selected column is a
- * variable-length array.
+ * tile-compressed image (`ZIMAGE = T`).
  *
  * @example
  * ```ts
@@ -537,16 +844,23 @@ export async function readTable(
     selected = model.columns;
   }
 
-  for (const column of selected) {
-    if (column.tform.code === "P" || column.tform.code === "Q") {
-      throw new FitsUnsupportedError(
-        `HDU ${hdu.index} column ${column.index + 1} (${column.tform.raw}) is a variable-length array; heap columns are not supported yet`,
-        { hduIndex: hdu.index },
-      );
-    }
-  }
-
   const states = selected.map((column) => makeState(column, rowCount));
+  const varlen = states.filter((s): s is VarlenState => s.kind === "varlen");
+
+  const label = (column: TableColumn): string =>
+    column.name === undefined
+      ? `column ${column.index + 1}`
+      : `column ${column.index + 1} (${column.name})`;
+
+  // Located before any read, so a broken heap header costs no I/O. Only
+  // fatal when a variable-length column is actually selected, so projecting
+  // around one still works on a table whose heap keywords are wrong.
+  const heap = heapGeometry(header, hdu.dataOffset, rowStride, totalRows);
+  warnings.push(...heap.warnings);
+  if (heap.problem !== undefined) {
+    if (varlen.length > 0) fail(heap.problem);
+    warnings.push(heap.problem);
+  }
 
   const needBytes = rowCount > 0 && selected.some((c) => c.byteWidth > 0);
   if (needBytes) {
@@ -565,24 +879,30 @@ export async function readTable(
 
       const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
       for (const state of states) {
-        decodeColumnSlab(state, bytes, view, slabRows, rowStride, done);
+        if (state.kind === "fixed") {
+          decodeColumnSlab(state, bytes, view, slabRows, rowStride, done);
+        } else {
+          decodeDescriptorSlab(state, view, slabRows, rowStride, done);
+        }
       }
     }
   }
 
+  if (varlen.length > 0) {
+    await gatherHeap(varlen, heap.geometry, reader, opts, fail, label, warnings);
+  }
+
   const columns: TableColumnData[] = states.map((state) => {
     if (state.badLogical) {
-      const label =
-        state.column.name === undefined
-          ? `column ${state.column.index + 1}`
-          : `column ${state.column.index + 1} (${state.column.name})`;
-      warnings.push(`${label}: logical bytes outside T/F/0x00 decoded as undefined`);
+      warnings.push(`${label(state.column)}: logical bytes outside T/F/0x00 decoded as undefined`);
     }
 
     return {
       column: state.column,
       values: opts.raw === true ? state.values : scaleColumn(state),
       mask: state.mask,
+      // An `A` column already holds one string per row, so it needs none.
+      offsets: state.kind === "varlen" && state.elementCode !== "A" ? state.offsets : undefined,
     };
   });
 
