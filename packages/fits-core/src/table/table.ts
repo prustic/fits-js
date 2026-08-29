@@ -641,7 +641,7 @@ async function gatherHeap(
   // cfitsio writes the heap in row order, so check before paying for a sort.
   let sorted = true;
   for (let i = 1; i < order.length && sorted; i++) {
-    if (heapOffsets[i] < heapOffsets[i - 1]) sorted = false;
+    if (heapOffsets[order[i]] < heapOffsets[order[i - 1]]) sorted = false;
   }
   if (!sorted) order.sort((a, b) => heapOffsets[a] - heapOffsets[b]);
 

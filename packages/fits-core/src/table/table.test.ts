@@ -821,6 +821,27 @@ test("contiguous heap arrays coalesce into a single read", async () => {
   assert.equal(counting.reads, 2, "one row slab, one coalesced heap window");
 });
 
+test("arrays too far apart to share a window skip the bytes between them", async () => {
+  // Two 4-byte arrays more than one slab apart: two windows, and the 9 MiB
+  // of unreferenced heap between them is never requested.
+  const span = 9 * 1024 * 1024;
+  const heap = new Uint8Array(span + 4);
+  const hv = new DataView(heap.buffer);
+  hv.setInt32(0, 111, false);
+  hv.setInt32(span, 222, false);
+
+  const { hdu, buf } = heapTable(
+    [card("NAXIS1", 8), card("NAXIS2", 2), card("TFIELDS", 1), "TFORM1  = '1PJ'"],
+    rows(desc32(1, 0), desc32(1, span)),
+    heap,
+  );
+  const counting = new CountingReader(new BytesReader(buf));
+  const t = await readTable(hdu, counting);
+  assert.deepEqual([...(t.columns[0].values as Int32Array)], [111, 222]);
+  assert.equal(counting.reads, 3, "one row slab plus one window per array");
+  assert.equal(counting.bytes, 16 + 4 + 4, "only the rows and the two arrays");
+});
+
 test("an abort during the heap phase rejects", async () => {
   const { hdu, buf } = heapTable(
     [card("NAXIS1", 8), card("NAXIS2", 1), card("TFIELDS", 1), "TFORM1  = '1PJ'"],
