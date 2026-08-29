@@ -34,12 +34,12 @@ jobs:
         id: changesets
         uses: changesets/action@v2
         with:
-          title: "chore: version packages"
-          version: pnpm version-packages
-          publish: pnpm release
-          createGithubReleases: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          pr-title: "chore: version packages"
+          version-script: pnpm version-packages
+          publish-script: pnpm release
+          create-github-releases: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # First publish of a package: no trusted publisher exists yet, so it
           # falls back to the token. Inert once OIDC is configured.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
