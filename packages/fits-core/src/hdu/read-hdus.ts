@@ -110,6 +110,27 @@ function isAllZero(bytes: Uint8Array): boolean {
   return true;
 }
 
+const latin1 = new TextDecoder("latin1");
+
+// Runs before parseHeader so strict mode names the real problem on a
+// non-FITS input instead of a downstream "no END card" error.
+function checkPrimarySignature(block: Uint8Array, strict: boolean, warnings: string[]): void {
+  const first = latin1.decode(block.subarray(0, 8)).trim().toUpperCase();
+  if (first === "SIMPLE") return;
+
+  const msg = `primary header does not begin with SIMPLE (first keyword is ${JSON.stringify(first)})`;
+  if (strict) throw new FitsStructureError(msg, { hduIndex: 0 });
+  warnings.push(msg);
+}
+
+// "truncated" is reserved for header and data-unit cuts; this wording is
+// deliberately different so the two signals stay distinguishable.
+function warnTrailing(tail: number, lastIndex: number, warnings: string[]): void {
+  warnings.push(
+    `${tail} trailing bytes after HDU ${lastIndex} do not form a full 2880-byte record; ignored (input may be incomplete)`,
+  );
+}
+
 interface HduStep {
   readonly hdu: Hdu;
   readonly nextOffset: number;
@@ -146,12 +167,6 @@ function buildHdu(
   warnings: string[],
 ): HduStep {
   const header = parsed.header;
-
-  if (index === 0 && !header.has("SIMPLE")) {
-    const msg = "primary header has no SIMPLE keyword";
-    if (strict) throw new FitsStructureError(msg, { hduIndex: 0 });
-    warnings.push(msg);
-  }
 
   // Legal syntax, so even strict mode accepts it, matching astropy.
   if (index === 0 && header.getBoolean("SIMPLE") === false) {
@@ -271,8 +286,15 @@ export function readHdus(bytes: Uint8Array, options: ParseHeaderOptions = {}): R
 
   let offset = 0;
   let index = 0;
+  let stopped = false;
   while (offset + BLOCK <= bytes.length) {
-    if (isAllZero(bytes.subarray(offset, offset + BLOCK))) break;
+    if (isAllZero(bytes.subarray(offset, offset + BLOCK))) {
+      stopped = true;
+      break;
+    }
+    if (index === 0) {
+      checkPrimarySignature(bytes.subarray(offset, offset + BLOCK), strict, warnings);
+    }
 
     const parsed = parseHeader(bytes.subarray(offset), options);
     warnings.push(...parsed.warnings);
@@ -280,13 +302,21 @@ export function readHdus(bytes: Uint8Array, options: ParseHeaderOptions = {}): R
 
     const step = buildHdu(parsed, offset, index, bytes.length, headerComplete, strict, warnings);
     hdus.push(step.hdu);
-    if (step.stop) break;
+    if (step.stop) {
+      stopped = true;
+      break;
+    }
     offset = step.nextOffset;
     index++;
   }
 
   if (hdus.length === 0) {
     rejectEmptyInput(bytes.length < BLOCK ? "short" : "zeros", strict, warnings);
+  }
+
+  const tail = bytes.length - offset;
+  if (!stopped && hdus.length > 0 && tail > 0) {
+    warnTrailing(tail, hdus.length - 1, warnings);
   }
 
   return { hdus, warnings };
@@ -361,9 +391,11 @@ export async function openFits(
   const hdus: Hdu[] = [];
   const total = reader.size;
 
+  let tail = 0; // bytes in a final short read, set by readBlock at EOF
   const readBlock = async (at: number): Promise<Uint8Array | null> => {
     options.signal?.throwIfAborted();
     const b = await reader.read(at, BLOCK);
+    tail = b.length < BLOCK ? b.length : 0;
     // Short read is EOF; an over-delivering reader is trimmed, not treated as EOF.
     return b.length < BLOCK ? null : b.subarray(0, BLOCK);
   };
@@ -374,9 +406,14 @@ export async function openFits(
   for (;;) {
     const first = await readBlock(offset);
     if (first === null || isAllZero(first)) {
-      if (index === 0) emptyReason = first === null ? "short" : "zeros";
+      if (index === 0) {
+        emptyReason = first === null ? "short" : "zeros";
+      } else if (first === null && tail > 0) {
+        warnTrailing(tail, hdus.length - 1, warnings);
+      }
       break;
     }
+    if (index === 0) checkPrimarySignature(first, strict, warnings);
 
     // Grow lenient: parseHeader's strict mode throws on the partial first
     // block before the loop can fetch block two. Authoritative strict re-parse

@@ -227,8 +227,9 @@ export function parseCard(raw80: string, ctx: CardParseContext): ParsedCard {
     };
   }
 
+  // No value indicator: bytes 9-80 are commentary text, a conforming
+  // record per FITS v4.0 4.1.2.3, so no warning even in strict mode.
   if (raw80[8] !== "=") {
-    reject(ctx, keyword, raw, `card has no value indicator: ${keyword}`);
     return {
       card: { keyword, value: undefined, commentary: true, raw },
       continues: false,

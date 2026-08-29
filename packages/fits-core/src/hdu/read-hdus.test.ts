@@ -169,11 +169,57 @@ test("random-groups format is rejected", () => {
   assert.throws(() => readHdus(rg), FitsUnsupportedError);
 });
 
-test("missing SIMPLE: lenient warns, strict throws", () => {
+test("missing SIMPLE: lenient warns exactly once, strict throws", () => {
   const noSimple = hdu(["BITPIX  =                    8", "NAXIS   =                    0"]);
   const { warnings } = readHdus(noSimple);
-  assert.ok(warnings.some((w) => w.includes("SIMPLE")));
+  assert.equal(warnings.filter((w) => w.includes("SIMPLE")).length, 1);
   assert.throws(() => readHdus(noSimple, { strict: true }), FitsStructureError);
+});
+
+test("non-FITS bytes are diagnosed as not beginning with SIMPLE", () => {
+  const garbage = new Uint8Array(2880);
+  garbage.fill(0x50); // 'P', a full block of non-FITS ASCII
+  const { warnings } = readHdus(garbage);
+  assert.ok(warnings.some((w) => w.includes("SIMPLE")));
+  assert.throws(
+    () => readHdus(garbage, { strict: true }),
+    (e: unknown) => e instanceof FitsStructureError && e.hduIndex === 0 && /SIMPLE/.test(e.message),
+  );
+});
+
+test("trailing bytes short of a full block warn instead of vanishing", () => {
+  const primary = hdu([
+    "SIMPLE  =                    T",
+    "BITPIX  =                    8",
+    "NAXIS   =                    0",
+  ]);
+  const junk = new Uint8Array(1000).fill(0x21);
+  const { hdus, warnings } = readHdus(concat(primary, junk));
+  assert.equal(hdus.length, 1);
+  assert.ok(warnings.some((w) => w.includes("1000 trailing bytes")));
+  assert.ok(!warnings.some((w) => w.includes("truncated")));
+  assert.doesNotThrow(() => readHdus(concat(primary, junk), { strict: true }));
+});
+
+test("a cut inside an extension's first header block warns", () => {
+  const primary = hdu([
+    "SIMPLE  =                    T",
+    "BITPIX  =                    8",
+    "NAXIS   =                    0",
+  ]);
+  const extStart = enc.encode("XTENSION= 'IMAGE   '".padEnd(1000));
+  const { hdus, warnings } = readHdus(concat(primary, extStart));
+  assert.equal(hdus.length, 1);
+  assert.ok(warnings.some((w) => w.includes("1000 trailing bytes")));
+});
+
+test("a block-aligned end of input stays silent", () => {
+  const primary = hdu([
+    "SIMPLE  =                    T",
+    "BITPIX  =                    8",
+    "NAXIS   =                    0",
+  ]);
+  assert.deepEqual(readHdus(primary).warnings, []);
 });
 
 test("truncated data unit: lenient clamps and warns, strict throws", () => {

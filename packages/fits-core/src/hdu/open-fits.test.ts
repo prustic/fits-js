@@ -264,3 +264,34 @@ test("openFits over an empty reader warns rather than returning silently", async
     FitsStructureError,
   );
 });
+
+test("a cut extension header block warns identically in both walkers", async () => {
+  const enc = new TextEncoder();
+  let h = [
+    "SIMPLE  =                    T",
+    "BITPIX  =                    8",
+    "NAXIS   =                    0",
+    "END",
+  ]
+    .map((c) => c.padEnd(80))
+    .join("")
+    .padEnd(2880, " ");
+  h += "XTENSION= 'IMAGE   '".padEnd(1000);
+  const bytes = enc.encode(h);
+
+  const sync = readHdus(bytes);
+  const async_ = await openFits(new BytesReader(bytes));
+  assert.deepEqual(shape(async_.hdus), shape(sync.hdus));
+  assert.deepEqual(async_.warnings, sync.warnings);
+  assert.ok(async_.warnings.some((w) => w.includes("1000 trailing bytes")));
+});
+
+test("openFits strict names SIMPLE on a non-FITS source before growing", async () => {
+  const garbage = new Uint8Array(2880 * 3).fill(0x50);
+  const { reader, reads } = countingReader(garbage);
+  await assert.rejects(
+    () => openFits(reader, { strict: true }),
+    (e: unknown) => e instanceof FitsStructureError && /SIMPLE/.test(e.message),
+  );
+  assert.equal(reads().length, 1, "must fail on the first block, not grow the header");
+});
