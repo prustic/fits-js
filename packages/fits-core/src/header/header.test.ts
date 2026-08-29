@@ -200,6 +200,17 @@ test("unclosed quote does not throw in lenient mode", () => {
   assert.equal(header.getNumber("OK"), 1);
 });
 
+test("keyword record without a value indicator is commentary, no warning", () => {
+  const bytes = hdr(["FOOBAR   notes about the run", "X       = 1", END]);
+  const { header, warnings } = parseHeader(bytes);
+  assert.equal(warnings.length, 0);
+  assert.equal(header.has("FOOBAR"), false);
+  const card = header.cards.find((c) => c.keyword === "FOOBAR");
+  assert.equal(card?.commentary, true);
+  assert.equal(card?.raw, "FOOBAR   notes about the run");
+  assert.doesNotThrow(() => parseHeader(bytes, { strict: true }));
+});
+
 test("HIERARCH without = falls through to commentary without crashing", () => {
   const { header } = parseHeader(hdr(["HIERARCH no equals sign here", "X       = 1", END]));
   assert.equal(header.getNumber("X"), 1);

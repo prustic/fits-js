@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { FitsHeaderError } from "../errors.js";
 import { parseHeader } from "./parse-header.js";
 
 // Fixtures are real archive primary headers; the expected values were
@@ -42,9 +41,18 @@ test("real HST WFPC2 primary header matches astropy", () => {
 });
 
 test("NASA testkeys primary header matches astropy", () => {
-  const { warnings } = assertMatchesAstropy("testkeys-primary");
-  // testkeys deliberately contains non-standard cards; lenient recovers.
-  assert.ok(warnings.length > 0);
+  const { warnings, header } = assertMatchesAstropy("testkeys-primary");
+  // Its long-keyword and split-string cards have no value indicator, a
+  // conforming shape parsed as commentary without a warning.
+  assert.equal(warnings.length, 0);
+  const valueless = header.cards.filter(
+    (c) => c.commentary && (c.keyword === "START_AI" || c.keyword === "STRVALUE"),
+  );
+  assert.deepEqual(
+    valueless.map((c) => c.keyword),
+    ["START_AI", "STRVALUE", "STRVALUE"],
+  );
+  assert.ok(valueless[0].raw.startsWith("START_AIRMASS = 1.134"));
 });
 
 test("CONTINUE long string joins exactly as astropy does", () => {
@@ -61,6 +69,8 @@ test("ESO HIERARCH keyword, value and comment match astropy", () => {
   assert.equal(card?.comment, exp.comment);
 });
 
-test("strict mode rejects the non-standard cards real files contain", () => {
-  assert.throws(() => parseHeader(fixture("testkeys-primary"), { strict: true }), FitsHeaderError);
+test("strict mode parses the real testkeys header clean", () => {
+  const { header, warnings } = parseHeader(fixture("testkeys-primary"), { strict: true });
+  assert.equal(warnings.length, 0);
+  assert.deepEqual(header.cards, parseHeader(fixture("testkeys-primary")).header.cards);
 });
