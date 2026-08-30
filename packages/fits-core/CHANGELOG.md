@@ -1,5 +1,33 @@
 # @fits-js/core
 
+## 0.2.0
+
+### Minor Changes
+
+- [#56](https://github.com/prustic/fits-js/pull/56) [`23a3554`](https://github.com/prustic/fits-js/commit/23a35547fd53eb2f6821243ef063c155c9273cf4) Thanks [@prustic](https://github.com/prustic)! - `readTable(hdu, reader, opts?)`: decode the fixed-width columns of a `BINTABLE` extension, column-major:
+  - Every fixed-width `TFORMn` type (`L X B I J K A E D C M`) with repeat counts, decoded from FITS big-endian into one flat typed array per column; `A` columns come back as one string per row, complex columns interleave re,im
+  - The full column keyword model on each result column: `TTYPEn`, `TUNITn`, `TSCALn`/`TZEROn`, `TNULLn`, `TDIMn` (metadata, data stays flat), `TDISPn`, byte offset and width
+  - astropy-parity scaling: the unsigned-integer convention stays integer (`Uint16`/`Uint32`/`BigUint64`, and `Int8` for the signed-byte form), any other `TSCALn`/`TZEROn` widens to `Float64Array`; `raw: true` bypasses
+  - Undefined elements surface on a per-column `mask` side channel with stored values untouched; float columns keep `NaN` in the values
+  - `columns` selects by `TTYPEn` name or index, `rows` decodes a contiguous range, and rows are fetched in bounded slabs with `AbortSignal` support
+  - Variable-length array columns (`P`/`Q`) parse into the column model and reject decoding with `FitsUnsupportedError`; project around them to read the rest of the table
+  - Adds the `FitsTable`, `TableColumnData`, `TableColumn`, `TableColumnArray`, `ParsedTform`, `ColumnTypeCode`, and `ReadTableOptions` types
+
+- [#62](https://github.com/prustic/fits-js/pull/62) [`3d095ef`](https://github.com/prustic/fits-js/commit/3d095ef5cff5f2609d813b4cb11bd49cda684890) Thanks [@prustic](https://github.com/prustic)! - `readTable` now decodes variable-length array columns (`TFORMn` `rPt(emax)` and `rQt(emax)`) from the `BINTABLE` heap:
+  - 32-bit `P` and 64-bit `Q` descriptors, `THEAP` with or without a gap ahead of the heap, and heaps whose arrays are unordered, aliased, or separated by unreferenced bytes
+  - Rows gather into an Arrow-shaped list: a flat `values` array plus a `rowCount + 1` entry `offsets` array on `TableColumnData`, so row `i` is `values.subarray(offsets[i], offsets[i + 1])`
+  - Every element type over the heap, with `TSCALn`/`TZEROn` and `TNULLn` applied to the heap data rather than the descriptors; a variable-length `A` column comes back as one string per row
+  - Descriptors are bounds-checked against the heap extent, so an array reaching past it is refused rather than silently truncated
+  - Only the arrays the selected columns and rows reference are fetched, in one forward pass, so a projection over a variable-length column now saves I/O as well as memory
+  - `TSCALn`/`TZEROn` on a `1PA` or `1PL` column are ignored with a warning, matching their fixed-width equivalents
+
+### Patch Changes
+
+- [#60](https://github.com/prustic/fits-js/pull/60) [`8a7a2c1`](https://github.com/prustic/fits-js/commit/8a7a2c1377d5a59eea18d290e7f10648aa8cf274) Thanks [@prustic](https://github.com/prustic)! - Header and HDU-walk diagnostics:
+  - A keyword record with no value indicator, the shape long-keyword conventions produce (`START_AIRMASS = 1.134 / ...`), parses as a commentary card with no warning, as the standard permits. Real archive headers that use it, such as the GSFC testkeys sample, now parse clean in strict mode too
+  - Input that is not FITS is diagnosed up front: a primary header that does not begin with `SIMPLE` warns in lenient mode and throws `FitsStructureError` in strict, instead of surfacing an unrelated `no END card found` error after the whole header is read. Strict mode also now rejects a `SIMPLE` card that is present but not first
+  - Trailing bytes that do not form a full 2880-byte record, including a header cut off mid-block, produce a warning instead of ending enumeration silently
+
 ## 0.1.0
 
 ### Minor Changes
