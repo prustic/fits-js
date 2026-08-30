@@ -63,10 +63,12 @@ export interface TableColumnData {
 }
 
 /**
- * A decoded `BINTABLE`, column-major.
+ * A decoded table, column-major.
  *
  * Unless `{ raw: true }` was passed, `TSCALn`/`TZEROn` are resolved per
- * column the way {@link readImage} resolves `BSCALE`/`BZERO`:
+ * column. On a `BINTABLE` that follows the image path's policy; an ASCII
+ * table has no unsigned convention, so scaling always widens to
+ * `Float64Array`:
  *
  * - **Unsigned-integer convention** (`TSCALn=1`, `TZEROn` at the half
  *   range): the matching integer array with no float widening, `Uint16Array`
@@ -78,6 +80,11 @@ export interface TableColumnData {
  *   the imaginary part). A scaled `K` value past `2^53` carries float64
  *   rounding; `raw: true` is exact.
  * - **No scaling**: the on-disk array as decoded.
+ *
+ * An ASCII table decodes `Aw` to one string per row, `Iw` to `Int32Array`
+ * up to nine digits and `BigInt64Array` beyond, and `Fw.d`, `Ew.d` and
+ * `Dw.d` all to `Float64Array`, since the standard defines no difference
+ * between the three.
  */
 export interface FitsTable {
   /** Rows decoded: the requested `rows` range, or all of them. */

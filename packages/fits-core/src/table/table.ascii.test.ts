@@ -143,6 +143,17 @@ test("a field that violates its TFORM is masked and warned about once", async ()
   assert.match(t.warnings[0], /row 1 does not match TFORM F6.2/);
 });
 
+test("an integer too large for int64 is masked, not wrapped", async () => {
+  // The standard caps neither the digits nor the range of an Iw field.
+  const { hdu, reader } = oneColumn("I20", ["99999999999999999999", "                  42"], 20);
+  const t = await readTable(hdu, reader);
+  const values = t.columns[0].values as BigInt64Array;
+  assert.equal(values[0], 0n, "no wrapped value is stored");
+  assert.equal(values[1], 42n);
+  assert.deepEqual([...(t.columns[0].mask as Uint8Array)], [1, 0]);
+  assert.match(t.warnings[0], /does not fit a 64-bit integer/);
+});
+
 test("a malformed integer masks and holds zero", async () => {
   const { hdu, reader } = oneColumn("I5", ["   12", "1 2  "], 5);
   const t = await readTable(hdu, reader);

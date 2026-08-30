@@ -271,6 +271,9 @@ export interface AsciiState extends BaseState {
   badText?: string;
   /** First byte an `A` field held outside the printable range (§7.2.5). */
   badCharByte?: number;
+  /** First row whose integer did not fit int64, and its text. */
+  overflowRow?: number;
+  overflowText?: string;
 }
 
 /** @internal Allocate the decode state for an ASCII column over `rowCount` rows. */
@@ -291,6 +294,9 @@ export function makeAsciiState(column: AsciiTableColumn, rowCount: number): Asci
 
 /** @internal Nine digits is the widest `Iw` that always fits int32. */
 const INT32_DIGITS = 9;
+
+const INT64_MIN = -(2n ** 63n);
+const INT64_MAX = 2n ** 63n - 1n;
 
 /**
  * @internal Decode one column's fields from a slab of `slabRows` whole rows
@@ -348,6 +354,16 @@ export function decodeAsciiSlab(
         flagBad(state, bytes, out, at, width, isNull);
         continue;
       }
+      // The standard caps neither digits nor range, so a wide field can
+      // hold a value int64 cannot; wrapping it silently is not an option.
+      if (v < INT64_MIN || v > INT64_MAX) {
+        setMask(state, out);
+        if (state.overflowRow === undefined) {
+          state.overflowRow = out;
+          state.overflowText = readAsciiText(bytes, at, width).trim();
+        }
+        continue;
+      }
       (state.values as BigInt64Array)[out] = v;
       continue;
     }
@@ -385,6 +401,11 @@ export function asciiWarnings(state: AsciiState, label: string): string[] {
   if (state.badRow !== undefined) {
     out.push(
       `${label}: row ${state.badRow} does not match TFORM ${state.column.tform.raw.trim()} (${JSON.stringify(state.badText)}); decoded as undefined`,
+    );
+  }
+  if (state.overflowRow !== undefined) {
+    out.push(
+      `${label}: row ${state.overflowRow} holds ${state.overflowText}, which does not fit a 64-bit integer; decoded as undefined`,
     );
   }
   if (state.badCharByte !== undefined) {
