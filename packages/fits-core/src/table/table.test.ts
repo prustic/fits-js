@@ -4,7 +4,7 @@ import { FitsIoError, FitsStructureError, FitsUnsupportedError } from "../errors
 import { BytesReader, type RandomAccessReader } from "../io/reader.js";
 import { readHdus } from "../hdu/read-hdus.js";
 import type { Hdu } from "../hdu/hdu.js";
-import { readTable } from "./table.js";
+import { readTable, type TableColumnArray } from "./table.js";
 
 /** Wraps a reader to record how much it was asked to fetch. */
 class CountingReader implements RandomAccessReader {
@@ -105,6 +105,27 @@ function ascii(s: string, width: number): Uint8Array {
   const out = new Uint8Array(width).fill(0x20);
   new TextEncoder().encodeInto(s, out);
   return out;
+}
+
+/** A 32-bit `P` array descriptor: element count, then heap byte offset. */
+function desc32(count: number, offset: number): Uint8Array {
+  return be([count, offset], 4);
+}
+
+/** A 64-bit `Q` array descriptor. */
+function desc64(count: number, offset: number): Uint8Array {
+  return be([BigInt(count), BigInt(offset)], 8);
+}
+
+/**
+ * A BINTABLE whose data unit is the row region, an optional gap, then the
+ * heap. `PCOUNT` spans gap plus heap, and a gap sets `THEAP` accordingly.
+ */
+function heapTable(cards: string[], rowBytes: Uint8Array, heap: Uint8Array, gap = 0) {
+  const extra = [card("PCOUNT", gap + heap.length)];
+  if (gap > 0) extra.push(card("THEAP", rowBytes.length + gap));
+
+  return binTableHdu([...cards, ...extra], rows(rowBytes, new Uint8Array(gap), heap));
 }
 
 test("hdu and reader arguments are validated", async () => {
@@ -449,28 +470,412 @@ test("a K column masks a bigint TNULL sentinel", async () => {
   assert.deepEqual([...(t.columns[0].mask as Uint8Array)], [1, 0]);
 });
 
-test("selecting a variable-length column is unsupported, projecting around it works", async () => {
-  const heap = be([1.5, 2.5], -4);
+test("a P column gathers the heap into flat values with Arrow offsets", async () => {
+  // Two rows: [1, 2] at heap 0, then [3] at heap 8.
+  const { hdu, reader } = heapTable(
+    [card("NAXIS1", 8), card("NAXIS2", 2), card("TFIELDS", 1), "TFORM1  = '1PJ'"],
+    rows(desc32(2, 0), desc32(1, 8)),
+    be([1, 2, 3], 4),
+  );
+  const t = await readTable(hdu, reader);
+  const col = t.columns[0];
+  assert.ok(col.values instanceof Int32Array);
+  assert.deepEqual([...col.values], [1, 2, 3]);
+  assert.deepEqual([...col.offsets!], [0, 2, 3]);
+  assert.equal(col.offsets![0], 0);
+  assert.equal(col.offsets!.length, t.rowCount + 1);
+  assert.equal(col.offsets![t.rowCount], col.values.length);
+});
+
+test("a Q column decodes identically to its P equivalent", async () => {
+  const heap = be([1, 2, 3], 4);
+  const p = heapTable(
+    [card("NAXIS1", 8), card("NAXIS2", 2), card("TFIELDS", 1), "TFORM1  = '1PJ'"],
+    rows(desc32(2, 0), desc32(1, 8)),
+    heap,
+  );
+  const q = heapTable(
+    [card("NAXIS1", 16), card("NAXIS2", 2), card("TFIELDS", 1), "TFORM1  = '1QJ'"],
+    rows(desc64(2, 0), desc64(1, 8)),
+    heap,
+  );
+  const pt = await readTable(p.hdu, p.reader);
+  const qt = await readTable(q.hdu, q.reader);
+  assert.deepEqual(qt.columns[0].values, pt.columns[0].values);
+  assert.deepEqual([...qt.columns[0].offsets!], [...pt.columns[0].offsets!]);
+});
+
+test("a zero-length row is an empty range, and its offset is ignored", async () => {
+  const { hdu, reader } = heapTable(
+    [card("NAXIS1", 8), card("NAXIS2", 3), card("TFIELDS", 1), "TFORM1  = '1PJ'"],
+    rows(desc32(1, 0), desc32(0, 999999), desc32(1, 4)),
+    be([7, 9], 4),
+  );
+  const t = await readTable(hdu, reader);
+  assert.deepEqual([...(t.columns[0].values as Int32Array)], [7, 9]);
+  assert.deepEqual([...t.columns[0].offsets!], [0, 1, 1, 2]);
+});
+
+test("a zero-repeat descriptor column is all empty rows and reads no heap", async () => {
+  const { hdu, buf } = heapTable(
+    [card("NAXIS1", 4), card("NAXIS2", 2), card("TFIELDS", 2), "TFORM1  = '0PJ'", "TFORM2  = '1J'"],
+    rows(be([11], 4), be([22], 4)),
+    new Uint8Array(0),
+  );
+  const counting = new CountingReader(new BytesReader(buf));
+  const t = await readTable(hdu, counting);
+  assert.equal(t.columns[0].values.length, 0);
+  assert.deepEqual([...t.columns[0].offsets!], [0, 0, 0]);
+  assert.deepEqual([...(t.columns[1].values as Int32Array)], [11, 22]);
+  assert.equal(counting.bytes, 8, "no heap window is opened");
+});
+
+test("a table with no rows yields a single zero offset and no heap read", async () => {
+  const { hdu, buf } = heapTable(
+    [card("NAXIS1", 8), card("NAXIS2", 0), card("TFIELDS", 1), "TFORM1  = '1PJ'"],
+    new Uint8Array(0),
+    new Uint8Array(0),
+  );
+  const counting = new CountingReader(new BytesReader(buf));
+  const t = await readTable(hdu, counting);
+  assert.deepEqual([...t.columns[0].offsets!], [0]);
+  assert.equal(t.columns[0].values.length, 0);
+  assert.equal(counting.reads, 0);
+});
+
+test("unordered, aliased and gapped heap offsets all gather correctly", async () => {
+  // Row 0 points past row 1 (unordered), row 2 aliases row 1, and heap
+  // bytes 8..16 are referenced by nobody.
+  const { hdu, reader } = heapTable(
+    [card("NAXIS1", 8), card("NAXIS2", 3), card("TFIELDS", 1), "TFORM1  = '1PI'"],
+    rows(desc32(2, 12), desc32(1, 0), desc32(1, 0)),
+    rows(be([5], 2), be([0], 2), be([0, 0, 0, 0], 2), be([7, 8], 2)),
+  );
+  const t = await readTable(hdu, reader);
+  assert.deepEqual([...(t.columns[0].values as Int16Array)], [7, 8, 5, 5]);
+  assert.deepEqual([...t.columns[0].offsets!], [0, 2, 3, 4]);
+});
+
+test("an explicit THEAP gap shifts the heap without disturbing the rows", async () => {
+  const { hdu, reader } = heapTable(
+    [card("NAXIS1", 8), card("NAXIS2", 1), card("TFIELDS", 1), "TFORM1  = '1PJ'"],
+    desc32(2, 0),
+    be([41, 42], 4),
+    24,
+  );
+  const t = await readTable(hdu, reader);
+  assert.deepEqual([...(t.columns[0].values as Int32Array)], [41, 42]);
+});
+
+test("every element type decodes from the heap", async () => {
+  const cases: { tform: string; heap: Uint8Array; count: number; expect: unknown }[] = [
+    { tform: "1PB", heap: be([200, 7], 1), count: 2, expect: [200, 7] },
+    { tform: "1PI", heap: be([-300, 12], 2), count: 2, expect: [-300, 12] },
+    { tform: "1PJ", heap: be([70000, -1], 4), count: 2, expect: [70000, -1] },
+    { tform: "1PK", heap: be([9007199254740993n], 8), count: 1, expect: [9007199254740993n] },
+    { tform: "1PE", heap: be([1.5, -2.25], -4), count: 2, expect: [1.5, -2.25] },
+    { tform: "1PD", heap: be([1e100], -8), count: 1, expect: [1e100] },
+  ];
+
+  for (const c of cases) {
+    const { hdu, reader } = heapTable(
+      [card("NAXIS1", 8), card("NAXIS2", 1), card("TFIELDS", 1), `TFORM1  = '${c.tform}'`],
+      desc32(c.count, 0),
+      c.heap,
+    );
+    const t = await readTable(hdu, reader);
+    assert.deepEqual(
+      [...(t.columns[0].values as Exclude<TableColumnArray, string[]>)],
+      c.expect,
+      c.tform,
+    );
+  }
+});
+
+test("heap complex columns take two slots per element", async () => {
+  const { hdu, reader } = heapTable(
+    [card("NAXIS1", 8), card("NAXIS2", 2), card("TFIELDS", 1), "TFORM1  = '1PC'"],
+    rows(desc32(2, 0), desc32(1, 16)),
+    be([1.5, -2, 3, 4.5, 9, -9], -4),
+  );
+  const t = await readTable(hdu, reader);
+  assert.deepEqual([...(t.columns[0].values as Float32Array)], [1.5, -2, 3, 4.5, 9, -9]);
+  assert.deepEqual([...t.columns[0].offsets!], [0, 4, 6], "offsets step by 2 per element");
+});
+
+test("a heap double-complex column interleaves re,im", async () => {
+  const { hdu, reader } = heapTable(
+    [card("NAXIS1", 8), card("NAXIS2", 2), card("TFIELDS", 1), "TFORM1  = '1PM'"],
+    rows(desc32(2, 0), desc32(1, 32)),
+    be([1.5, -2, 3, 4.5, 9, -9], -8),
+  );
+  const t = await readTable(hdu, reader);
+  assert.deepEqual([...(t.columns[0].values as Float64Array)], [1.5, -2, 3, 4.5, 9, -9]);
+  assert.deepEqual([...t.columns[0].offsets!], [0, 4, 6]);
+});
+
+test("a heap logical column masks undefined bytes and flags junk", async () => {
+  const { hdu, reader } = heapTable(
+    [card("NAXIS1", 8), card("NAXIS2", 1), card("TFIELDS", 1), "TFORM1  = '1PL'"],
+    desc32(4, 0),
+    Uint8Array.of(0x54, 0x46, 0x00, 0x2a),
+    0,
+  );
+  const t = await readTable(hdu, reader);
+  assert.deepEqual([...(t.columns[0].values as Uint8Array)], [1, 0, 0, 0]);
+  assert.deepEqual([...(t.columns[0].mask as Uint8Array)], [0, 0, 1, 1]);
+  assert.ok(t.warnings.some((w) => /logical bytes outside T\/F\/0x00/.test(w)));
+});
+
+test("an astropy-written logical heap is refused by value and named", async () => {
+  // astropy 6 writes 0x01/0x00 into a variable-length logical heap, which
+  // the standard does not allow (7.3.3 permits only T, F and 0x00). Those
+  // bytes decode as undefined rather than as true, and the warning names
+  // the byte so the cause is obvious from the message alone.
+  const { hdu, reader } = heapTable(
+    [card("NAXIS1", 8), card("NAXIS2", 1), card("TFIELDS", 1), "TFORM1  = '1PL'"],
+    desc32(4, 0),
+    Uint8Array.of(0x01, 0x00, 0x01, 0x00),
+  );
+  const t = await readTable(hdu, reader);
+  assert.deepEqual([...(t.columns[0].values as Uint8Array)], [0, 0, 0, 0]);
+  assert.deepEqual([...(t.columns[0].mask as Uint8Array)], [1, 1, 1, 1]);
+  assert.ok(t.warnings.some((w) => /first saw 0x01/.test(w)));
+});
+
+test("a heap bit column counts bits and drops the trailing pad", async () => {
+  // 12 bits occupy 2 bytes; the last 4 bits of the second byte are padding
+  // (FITS v4.0 7.3.3). Asserted against the standard alone: astropy rejects
+  // a 1PX column outright with "Invalid column format", so it cannot serve
+  // as an oracle here.
+  const { hdu, reader } = heapTable(
+    [card("NAXIS1", 8), card("NAXIS2", 1), card("TFIELDS", 1), "TFORM1  = '1PX'"],
+    desc32(12, 0),
+    Uint8Array.of(0b10100011, 0b01010000),
+  );
+  const t = await readTable(hdu, reader);
+  assert.deepEqual([...(t.columns[0].values as Uint8Array)], [1, 0, 1, 0, 0, 0, 1, 1, 0, 1, 0, 1]);
+  assert.deepEqual([...t.columns[0].offsets!], [0, 12]);
+});
+
+test("a heap character column yields one string per row and no offsets", async () => {
+  const { hdu, reader } = heapTable(
+    [card("NAXIS1", 8), card("NAXIS2", 2), card("TFIELDS", 1), "TFORM1  = '1PA'"],
+    rows(desc32(5, 0), desc32(4, 5)),
+    rows(ascii("AB", 5), Uint8Array.of(0x43, 0x44, 0x00, 0x58)),
+  );
+  const t = await readTable(hdu, reader);
+  assert.deepEqual(t.columns[0].values, ["AB", "CD"]);
+  assert.equal(t.columns[0].offsets, undefined);
+});
+
+test("heap values scale and mask like fixed-width ones", async () => {
+  const scaled = heapTable(
+    [
+      card("NAXIS1", 8),
+      card("NAXIS2", 1),
+      card("TFIELDS", 1),
+      "TFORM1  = '1PI'",
+      card("TSCAL1", 0.5),
+      card("TZERO1", 10),
+    ],
+    desc32(2, 0),
+    be([4, -4], 2),
+  );
+  const st = await readTable(scaled.hdu, scaled.reader);
+  assert.ok(st.columns[0].values instanceof Float64Array);
+  assert.deepEqual([...st.columns[0].values], [12, 8]);
+
+  const raw = await readTable(scaled.hdu, scaled.reader, { raw: true });
+  assert.ok(raw.columns[0].values instanceof Int16Array);
+  assert.deepEqual([...raw.columns[0].values], [4, -4]);
+});
+
+test("a heap column honours the unsigned-integer convention", async () => {
+  const { hdu, reader } = heapTable(
+    [
+      card("NAXIS1", 8),
+      card("NAXIS2", 1),
+      card("TFIELDS", 1),
+      "TFORM1  = '1PI'",
+      card("TZERO1", 32768),
+    ],
+    desc32(1, 0),
+    be([-32768], 2),
+  );
+  const t = await readTable(hdu, reader);
+  assert.ok(t.columns[0].values instanceof Uint16Array);
+  assert.equal(t.columns[0].values[0], 0);
+});
+
+test("TNULL masks the right slots of a gathered column", async () => {
+  const { hdu, reader } = heapTable(
+    [
+      card("NAXIS1", 8),
+      card("NAXIS2", 2),
+      card("TFIELDS", 1),
+      "TFORM1  = '1PJ'",
+      card("TNULL1", -999),
+    ],
+    rows(desc32(1, 0), desc32(2, 4)),
+    be([5, -999, 6], 4),
+  );
+  const t = await readTable(hdu, reader);
+  assert.deepEqual([...(t.columns[0].values as Int32Array)], [5, -999, 6]);
+  assert.deepEqual([...(t.columns[0].mask as Uint8Array)], [0, 1, 0]);
+});
+
+test("descriptors that the heap cannot contain are refused", async () => {
+  const build = (d: Uint8Array) =>
+    heapTable(
+      [card("NAXIS1", 8), card("NAXIS2", 1), card("TFIELDS", 1), "TFORM1  = '1PJ'"],
+      d,
+      be([1, 2], 4),
+    );
+
+  const negCount = build(desc32(-1, 0));
+  await assert.rejects(readTable(negCount.hdu, negCount.reader), /negative or non-integer array/);
+
+  const negOffset = build(desc32(1, -4));
+  await assert.rejects(readTable(negOffset.hdu, negOffset.reader), /negative or non-integer heap/);
+
+  // 3 int32 need 12 bytes but the heap holds 8, even though the 2880-byte
+  // padding physically follows; dataByteLength is not the bound.
+  const past = build(desc32(3, 0));
+  await assert.rejects(readTable(past.hdu, past.reader), /spans heap bytes 0\.\.12/);
+});
+
+test("a count past the declared emax warns but still decodes", async () => {
+  const { hdu, reader } = heapTable(
+    [card("NAXIS1", 8), card("NAXIS2", 1), card("TFIELDS", 1), "TFORM1  = '1PJ(1)'"],
+    desc32(2, 0),
+    be([4, 5], 4),
+  );
+  const t = await readTable(hdu, reader);
+  assert.deepEqual([...(t.columns[0].values as Int32Array)], [4, 5]);
+  assert.ok(t.warnings.some((w) => /more than the 1 declared by TFORM/.test(w)));
+});
+
+test("a broken THEAP is fatal when selected and a warning when projected around", async () => {
+  const { hdu, reader } = binTableHdu(
+    [
+      card("NAXIS1", 12),
+      card("NAXIS2", 1),
+      card("PCOUNT", 8),
+      card("THEAP", 4),
+      card("TFIELDS", 2),
+      "TFORM1  = '1J'",
+      "TTYPE1  = 'VAL'",
+      "TFORM2  = '1PJ'",
+      "TTYPE2  = 'SPEC'",
+    ],
+    rows(be([42], 4), desc32(1, 0), be([7, 0], 4)),
+  );
+  await assert.rejects(readTable(hdu, reader), /THEAP 4 would overlap the 12-byte main table/);
+
+  const t = await readTable(hdu, reader, { columns: ["VAL"] });
+  assert.deepEqual([...(t.columns[0].values as Int32Array)], [42]);
+  assert.ok(t.warnings.some((w) => /THEAP 4 would overlap/.test(w)));
+});
+
+test("a truncated heap is a structural error", async () => {
+  const { hdu, buf } = heapTable(
+    [card("NAXIS1", 8), card("NAXIS2", 1), card("TFIELDS", 1), "TFORM1  = '1PJ'"],
+    desc32(2, 0),
+    be([1, 2], 4),
+  );
+  const short = new BytesReader(buf.subarray(0, 2880 * 2 + 12));
+  await assert.rejects(readTable(hdu, short), /heap data is truncated at byte/);
+});
+
+test("projecting around a varlen column fetches no heap bytes", async () => {
   const { hdu, buf } = binTableHdu(
     [
       card("NAXIS1", 12),
       card("NAXIS2", 1),
-      card("PCOUNT", heap.length),
+      card("PCOUNT", 8),
       card("TFIELDS", 2),
       "TFORM1  = '1J'",
       "TTYPE1  = 'VAL'",
       "TFORM2  = '1PE(2)'",
       "TTYPE2  = 'SPEC'",
     ],
-    rows(be([42], 4), be([2], 4), be([0], 4), heap),
+    rows(be([42], 4), desc32(2, 0), be([1.5, 2.5], -4)),
   );
   const counting = new CountingReader(new BytesReader(buf));
-  await assert.rejects(readTable(hdu, counting), FitsUnsupportedError);
-  await assert.rejects(readTable(hdu, counting, { columns: ["SPEC"] }), FitsUnsupportedError);
-
   const t = await readTable(hdu, counting, { columns: ["val"] });
   assert.deepEqual([...(t.columns[0].values as Int32Array)], [42]);
-  assert.equal(counting.bytes, 12, "heap bytes must never be fetched");
+  assert.equal(counting.bytes, 12, "only the row region is fetched");
+
+  const withHeap = new CountingReader(new BytesReader(buf));
+  const full = await readTable(hdu, withHeap, { columns: ["SPEC"] });
+  assert.deepEqual([...(full.columns[0].values as Float32Array)], [1.5, 2.5]);
+  assert.equal(withHeap.bytes, 12 + 8, "the row region plus exactly its arrays");
+});
+
+test("a rows range fetches only the heap those rows reference", async () => {
+  const { hdu, buf } = heapTable(
+    [card("NAXIS1", 8), card("NAXIS2", 3), card("TFIELDS", 1), "TFORM1  = '1PJ'"],
+    rows(desc32(1, 0), desc32(1, 4), desc32(1, 8)),
+    be([10, 11, 12], 4),
+  );
+  const counting = new CountingReader(new BytesReader(buf));
+  const t = await readTable(hdu, counting, { rows: { start: 1, count: 1 } });
+  assert.deepEqual([...(t.columns[0].values as Int32Array)], [11]);
+  assert.equal(counting.bytes, 8 + 4, "one row of descriptors plus one array");
+});
+
+test("contiguous heap arrays coalesce into a single read", async () => {
+  const { hdu, buf } = heapTable(
+    [card("NAXIS1", 8), card("NAXIS2", 4), card("TFIELDS", 1), "TFORM1  = '1PJ'"],
+    rows(desc32(1, 0), desc32(1, 4), desc32(1, 8), desc32(1, 12)),
+    be([1, 2, 3, 4], 4),
+  );
+  const counting = new CountingReader(new BytesReader(buf));
+  const t = await readTable(hdu, counting);
+  assert.deepEqual([...(t.columns[0].values as Int32Array)], [1, 2, 3, 4]);
+  assert.equal(counting.reads, 2, "one row slab, one coalesced heap window");
+});
+
+test("arrays too far apart to share a window skip the bytes between them", async () => {
+  // Two 4-byte arrays more than one slab apart: two windows, and the 9 MiB
+  // of unreferenced heap between them is never requested.
+  const span = 9 * 1024 * 1024;
+  const heap = new Uint8Array(span + 4);
+  const hv = new DataView(heap.buffer);
+  hv.setInt32(0, 111, false);
+  hv.setInt32(span, 222, false);
+
+  const { hdu, buf } = heapTable(
+    [card("NAXIS1", 8), card("NAXIS2", 2), card("TFIELDS", 1), "TFORM1  = '1PJ'"],
+    rows(desc32(1, 0), desc32(1, span)),
+    heap,
+  );
+  const counting = new CountingReader(new BytesReader(buf));
+  const t = await readTable(hdu, counting);
+  assert.deepEqual([...(t.columns[0].values as Int32Array)], [111, 222]);
+  assert.equal(counting.reads, 3, "one row slab plus one window per array");
+  assert.equal(counting.bytes, 16 + 4 + 4, "only the rows and the two arrays");
+});
+
+test("an abort during the heap phase rejects", async () => {
+  const { hdu, buf } = heapTable(
+    [card("NAXIS1", 8), card("NAXIS2", 1), card("TFIELDS", 1), "TFORM1  = '1PJ'"],
+    desc32(2, 0),
+    be([1, 2], 4),
+  );
+  const controller = new AbortController();
+  const reader: RandomAccessReader = {
+    size: buf.length,
+    read: async (o, l) => {
+      // Abort once the row region has been read, before the heap window.
+      controller.abort();
+      return new BytesReader(buf).read(o, l);
+    },
+  };
+  await assert.rejects(readTable(hdu, reader, { signal: controller.signal }), {
+    name: "AbortError",
+  });
 });
 
 test("projection selects by name and index, in selection order", async () => {

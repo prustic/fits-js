@@ -57,13 +57,19 @@ test("openFits + readTable end to end over real HTTP Range (containerized nginx)
   assert.equal(t.columns[0].values.length, 640);
   assert.deepEqual([...(t.columns[1].values as Int16Array)], [640]);
 
-  // Every readTable request must stay within the fixed-width rows; the
-  // heap region (none here) and padding must never be asked for.
+  // Every readTable request lands in the row region or the heap region,
+  // never in the 2880-byte padding that follows them. This table declares
+  // PCOUNT 0, so its heap region is empty and every read is a row read.
+  const pcount = melo.header.getNumber("PCOUNT") ?? 0;
+  const rowEnd = melo.dataOffset + ROW_WIDTH * 1;
+  const heapEnd = rowEnd + pcount;
+  assert.equal(pcount, 0);
+
   const tableReads = reads().slice(enumerationReads);
   assert.ok(tableReads.length > 0);
   for (const [o, l] of tableReads) {
     assert.ok(o >= melo.dataOffset, "reads must start inside the data unit");
-    assert.ok(o + l <= melo.dataOffset + ROW_WIDTH, "reads must not run past the row bytes");
+    assert.ok(o + l <= heapEnd, "reads must not run past the rows and heap");
   }
 
   // Independent decode: a second reader fetches spot elements via tiny Range

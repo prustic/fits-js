@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { FitsStructureError } from "../errors.js";
 import { parseHeader } from "../header/parse-header.js";
-import { parseTdim, parseTform, readTableColumns } from "./columns.js";
+import { heapArrayBytes, parseTdim, parseTform, readTableColumns } from "./columns.js";
 
 /** Build header bytes from card images, padding to 2880 with spaces. */
 function hdr(cards: string[]): Uint8Array {
@@ -177,6 +177,47 @@ test("TSCAL/TZERO on L, X or A columns are ignored with a warning", () => {
   assert.equal(warnings.length, 2);
   assert.match(warnings[0], /TSCAL1 does not apply to a A column/);
   assert.match(warnings[1], /TZERO2 does not apply to a L column/);
+});
+
+test("a varlen column takes its scaling rules from the element type", () => {
+  const { columns: cols, warnings } = columns([
+    "TFIELDS =                    3",
+    "TFORM1  = '1PA'",
+    "TSCAL1  = 2.0",
+    "TFORM2  = '1PL'",
+    "TZERO2  = 5",
+    "TFORM3  = '1PJ'",
+    "TSCAL3  = 0.5",
+  ]);
+  assert.equal(cols[0].tscal, 1);
+  assert.equal(cols[1].tzero, 0);
+  assert.equal(cols[2].tscal, 0.5, "a varlen integer column still scales");
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /TSCAL1 does not apply to a A column/);
+  assert.match(warnings[1], /TZERO2 does not apply to a L column/);
+});
+
+test("heapArrayBytes sizes an array by its element type", () => {
+  assert.equal(heapArrayBytes("B", 5), 5);
+  assert.equal(heapArrayBytes("I", 5), 10);
+  assert.equal(heapArrayBytes("J", 5), 20);
+  assert.equal(heapArrayBytes("K", 5), 40);
+  assert.equal(heapArrayBytes("E", 5), 20);
+  assert.equal(heapArrayBytes("D", 5), 40);
+  assert.equal(heapArrayBytes("C", 5), 40);
+  assert.equal(heapArrayBytes("M", 5), 80);
+  assert.equal(heapArrayBytes("A", 5), 5);
+  assert.equal(heapArrayBytes("L", 5), 5);
+  assert.equal(heapArrayBytes("J", 0), 0);
+});
+
+test("heapArrayBytes rounds a bit array up to whole bytes", () => {
+  assert.equal(heapArrayBytes("X", 0), 0);
+  assert.equal(heapArrayBytes("X", 1), 1);
+  assert.equal(heapArrayBytes("X", 8), 1);
+  assert.equal(heapArrayBytes("X", 9), 2);
+  assert.equal(heapArrayBytes("X", 12), 2);
+  assert.equal(heapArrayBytes("X", 16), 2);
 });
 
 test("TNULL applies to integer columns, including varlen integer elements", () => {
