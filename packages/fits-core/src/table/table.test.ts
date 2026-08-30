@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { FitsIoError, FitsStructureError, FitsUnsupportedError } from "../errors.js";
+import { FitsIoError, FitsStructureError } from "../errors.js";
 import { BytesReader, type RandomAccessReader } from "../io/reader.js";
 import { readHdus } from "../hdu/read-hdus.js";
 import type { Hdu } from "../hdu/hdu.js";
@@ -203,18 +203,13 @@ test("a tile-compressed image names the compression, not its heap column", async
   );
 });
 
-test("a non-table HDU is rejected, an ASCII table as unsupported", async () => {
+test("a non-table HDU is rejected", async () => {
   const { hdu, reader, buf } = binTableHdu(
     [card("NAXIS1", 2), card("NAXIS2", 1), card("TFIELDS", 1), "TFORM1  = '1I'"],
     be([7], 2),
   );
   const primary = readHdus(buf).hdus[0];
-  await assert.rejects(readTable(primary, reader), /HDU 0 is not a binary table \(type primary\)/);
-
-  const asciiBuf = binTableFile([], new Uint8Array(0));
-  new TextEncoder().encodeInto("XTENSION= 'TABLE   '", asciiBuf.subarray(2880));
-  const asciiHdu = readHdus(asciiBuf).hdus[1];
-  await assert.rejects(readTable(asciiHdu, new BytesReader(asciiBuf)), FitsUnsupportedError);
+  await assert.rejects(readTable(primary, reader), /HDU 0 is not a table \(type primary\)/);
   assert.equal(hdu.type, "bintable");
 });
 

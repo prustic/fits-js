@@ -19,14 +19,14 @@ function columns(cards: string[]) {
 }
 
 test("parseTform: implicit repeat is 1", () => {
-  assert.deepEqual(parseTform("E"), { code: "E", repeat: 1, raw: "E" });
-  assert.deepEqual(parseTform("J"), { code: "J", repeat: 1, raw: "J" });
+  assert.deepEqual(parseTform("E"), { kind: "binary", code: "E", repeat: 1, raw: "E" });
+  assert.deepEqual(parseTform("J"), { kind: "binary", code: "J", repeat: 1, raw: "J" });
 });
 
 test("parseTform: explicit and zero repeat counts", () => {
-  assert.deepEqual(parseTform("640E"), { code: "E", repeat: 640, raw: "640E" });
-  assert.deepEqual(parseTform("0J"), { code: "J", repeat: 0, raw: "0J" });
-  assert.deepEqual(parseTform("  5A"), { code: "A", repeat: 5, raw: "  5A" });
+  assert.deepEqual(parseTform("640E"), { kind: "binary", code: "E", repeat: 640, raw: "640E" });
+  assert.deepEqual(parseTform("0J"), { kind: "binary", code: "J", repeat: 0, raw: "0J" });
+  assert.deepEqual(parseTform("  5A"), { kind: "binary", code: "A", repeat: 5, raw: "  5A" });
 });
 
 test("parseTform: every fixed-width code is recognized", () => {
@@ -40,6 +40,7 @@ test("parseTform: every fixed-width code is recognized", () => {
 
 test("parseTform: P and Q descriptors", () => {
   assert.deepEqual(parseTform("1PE(200)"), {
+    kind: "binary",
     code: "P",
     repeat: 1,
     elementCode: "E",
@@ -47,6 +48,7 @@ test("parseTform: P and Q descriptors", () => {
     raw: "1PE(200)",
   });
   assert.deepEqual(parseTform("QD"), {
+    kind: "binary",
     code: "Q",
     repeat: 1,
     elementCode: "D",

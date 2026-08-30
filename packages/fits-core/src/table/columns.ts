@@ -2,7 +2,7 @@ import { FitsStructureError } from "../errors.js";
 import type { FitsHeader } from "../header/header.js";
 
 /**
- * A `TFORMn` data type code
+ * A `BINTABLE` `TFORMn` data type code
  * ([FITS Standard v4.0 §7.3.1](https://fits.gsfc.nasa.gov/fits_standard.html)).
  *
  * `L` logical, `X` bit, `B` unsigned byte, `I` int16, `J` int32, `K` int64,
@@ -25,10 +25,22 @@ export type ColumnTypeCode =
   | "Q";
 
 /**
- * A parsed `TFORMn` value: `rT` for a fixed-width column, `rPt(emax)` or
- * `rQt(emax)` for a variable-length array column.
+ * An ASCII table `TFORMn` data type code
+ * ([FITS Standard v4.0 §7.2.5](https://fits.gsfc.nasa.gov/fits_standard.html)).
+ *
+ * `A` character, `I` decimal integer, `F` fixed-point, `E` and `D`
+ * exponential. The standard defines no difference between `F`, `E` and `D`:
+ * the field text alone determines the value, so all three decode to
+ * `Float64Array`.
  */
-export interface ParsedTform {
+export type AsciiTypeCode = "A" | "I" | "F" | "E" | "D";
+
+/**
+ * A parsed `BINTABLE` `TFORMn`: `rT` for a fixed-width column, `rPt(emax)`
+ * or `rQt(emax)` for a variable-length array column.
+ */
+export interface BinaryTform {
+  readonly kind: "binary";
   readonly code: ColumnTypeCode;
   /** Repeat count `r`; 1 when absent. 0 or 1 for `P`/`Q`. */
   readonly repeat: number;
@@ -39,6 +51,30 @@ export interface ParsedTform {
   /** `TFORMn` exactly as written, including any trailing characters. */
   readonly raw: string;
 }
+
+/** A parsed ASCII table `TFORMn`: `Aw`, `Iw`, `Fw.d`, `Ew.d` or `Dw.d`. */
+export interface AsciiTform {
+  readonly kind: "ascii";
+  readonly code: AsciiTypeCode;
+  /** Field width `w` in characters; always equals {@link TableColumn.byteWidth}. */
+  readonly width: number;
+  /**
+   * Digits `d` to the right of the decimal point, for `F`, `E` and `D`.
+   * Used only when the field text carries no explicit point, in which case
+   * the point sits before the rightmost `d` digits. That convention is
+   * deprecated by the standard but still legal. Absent for `A` and `I`.
+   */
+  readonly decimals?: number;
+  /** `TFORMn` exactly as written, including any trailing characters. */
+  readonly raw: string;
+}
+
+/**
+ * A parsed `TFORMn`, discriminated by the kind of table it came from. The
+ * code letters overlap but do not mean the same thing: a `BINTABLE` `E` is
+ * float32 on disk, while an ASCII `E` is text of arbitrary precision.
+ */
+export type ParsedTform = BinaryTform | AsciiTform;
 
 /**
  * One column of a `BINTABLE`, assembled from its indexed header keywords.
@@ -66,6 +102,15 @@ export interface TableColumn {
   /** `TNULLn` when it exceeds safe-integer range (`K` columns). */
   readonly tnullBig?: bigint;
   /**
+   * `TNULLn` of an ASCII table column: the character string that marks an
+   * undefined field (§7.2.2). Unlike the `BINTABLE` integer sentinel it
+   * applies to every field type, `A` included. Compared against the field
+   * text with both sides blank-trimmed, so a sentinel matches whichever way
+   * its writer justified it, and an all-blank `TNULLn` marks blank fields
+   * undefined.
+   */
+  readonly tnullText?: string;
+  /**
    * Parsed `TDIMn` axes in FITS order (`d1` fastest-varying), when declared
    * and consistent. Metadata only: {@link TableColumnData.values} stays a
    * flat array regardless.
@@ -77,6 +122,11 @@ export interface TableColumn {
   readonly byteWidth: number;
   /** Byte offset of this field from the start of its row. */
   readonly byteOffset: number;
+}
+
+/** @internal A column of a `BINTABLE`, with its `TFORMn` arm narrowed. */
+export interface BinaryTableColumn extends TableColumn {
+  readonly tform: BinaryTform;
 }
 
 /** @internal Bytes per single element, keyed by fixed-width type code. */
@@ -116,7 +166,7 @@ function scanDigits(s: string, i: number): { value: number; next: number } | und
  * recognized portion are legal per the standard and stay only in `raw`.
  * Returns `undefined` on malformed input; the caller owns the error message.
  */
-export function parseTform(raw: string): ParsedTform | undefined {
+export function parseTform(raw: string): BinaryTform | undefined {
   let i = 0;
   while (i < raw.length && raw[i] === " ") {
     i++;
@@ -150,6 +200,7 @@ export function parseTform(raw: string): ParsedTform | undefined {
     }
 
     return {
+      kind: "binary",
       code,
       repeat,
       elementCode: element as Exclude<ColumnTypeCode, "P" | "Q">,
@@ -160,7 +211,7 @@ export function parseTform(raw: string): ParsedTform | undefined {
 
   if (!(code in ELEMENT_BYTES)) return undefined;
 
-  return { code: code as ColumnTypeCode, repeat, raw };
+  return { kind: "binary", code: code as ColumnTypeCode, repeat, raw };
 }
 
 /**
@@ -210,7 +261,7 @@ export function parseTdim(raw: string): number[] | undefined {
 }
 
 /** @internal The field width in bytes of a parsed TFORM. */
-function tformWidth(tform: ParsedTform): number {
+function tformWidth(tform: BinaryTform): number {
   if (tform.code === "P") return 8 * tform.repeat;
   if (tform.code === "Q") return 16 * tform.repeat;
   if (tform.code === "X") return Math.ceil(tform.repeat / 8);
@@ -234,10 +285,74 @@ export function heapArrayBytes(
 
 /** @internal The result of assembling a BINTABLE's column keyword model. */
 export interface TableColumnsResult {
-  columns: TableColumn[];
+  columns: BinaryTableColumn[];
   /** Sum of the column widths; the caller checks it against `NAXIS1`. */
   rowWidth: number;
   warnings: string[];
+}
+
+/**
+ * @internal Read and validate `TFIELDS`. Shared by both table kinds; the
+ * 0..999 limit is the same in §7.2.1 and §7.3.1.
+ */
+export function readTfields(header: FitsHeader, fail: (msg: string) => never): number {
+  const tfields = header.getNumber("TFIELDS");
+  if (tfields === undefined || !Number.isInteger(tfields) || tfields < 0 || tfields > 999) {
+    fail(`TFIELDS ${String(tfields)} is not an integer in 0..999`);
+  }
+
+  return tfields;
+}
+
+/** @internal `TSCALn`/`TZEROn` as both table kinds resolve them. */
+export interface ColumnScaling {
+  tscal: number;
+  tzero: number;
+  tzeroBig?: bigint;
+}
+
+/**
+ * @internal Read `TSCALn`/`TZEROn` for column `n`. `scalable` is false for
+ * the types the standard forbids them on, which differ per table kind, so
+ * the caller decides; the warning wording is shared.
+ */
+export function readScaling(
+  header: FitsHeader,
+  n: number,
+  scalable: boolean,
+  elementType: string,
+  warn: (msg: string) => void,
+): ColumnScaling {
+  let tscal = 1;
+  const tscalRaw = header.get(`TSCAL${n}`);
+  if (typeof tscalRaw === "number" || typeof tscalRaw === "bigint") {
+    if (scalable) {
+      tscal = Number(tscalRaw);
+      if (tscal === 0) {
+        warn(`TSCAL${n} is 0; every scaled value collapses to TZERO`);
+      }
+    } else if (Number(tscalRaw) !== 1) {
+      warn(`TSCAL${n} does not apply to a ${elementType} column; ignored`);
+    }
+  } else if (tscalRaw !== undefined) {
+    warn(`TSCAL${n} ${JSON.stringify(tscalRaw)} is not a number; ignored`);
+  }
+
+  let tzero = 0;
+  let tzeroBig: bigint | undefined;
+  const tzeroRaw = header.get(`TZERO${n}`);
+  if (typeof tzeroRaw === "number" || typeof tzeroRaw === "bigint") {
+    if (scalable) {
+      tzero = Number(tzeroRaw);
+      if (typeof tzeroRaw === "bigint") tzeroBig = tzeroRaw;
+    } else if (Number(tzeroRaw) !== 0) {
+      warn(`TZERO${n} does not apply to a ${elementType} column; ignored`);
+    }
+  } else if (tzeroRaw !== undefined) {
+    warn(`TZERO${n} ${JSON.stringify(tzeroRaw)} is not a number; ignored`);
+  }
+
+  return { tscal, tzero, tzeroBig };
 }
 
 /**
@@ -250,17 +365,14 @@ export function readTableColumns(header: FitsHeader, hduIndex: number): TableCol
     throw new FitsStructureError(`HDU ${hduIndex}: ${msg}`, { hduIndex });
   };
 
-  const tfields = header.getNumber("TFIELDS");
-  if (tfields === undefined || !Number.isInteger(tfields) || tfields < 0 || tfields > 999) {
-    fail(`TFIELDS ${String(tfields)} is not an integer in 0..999`);
-  }
+  const tfields = readTfields(header, fail);
 
-  const columns: TableColumn[] = [];
+  const columns: BinaryTableColumn[] = [];
   const warnings: string[] = [];
   const seenNames = new Set<string>();
   let byteOffset = 0;
 
-  for (let n = 1; n <= tfields!; n++) {
+  for (let n = 1; n <= tfields; n++) {
     const name = header.getString(`TTYPE${n}`);
     const label = name === undefined ? `column ${n}` : `column ${n} (${name})`;
     const warn = (msg: string): void => {
@@ -290,34 +402,7 @@ export function readTableColumns(header: FitsHeader, hduIndex: number): TableCol
 
     // TSCAL/TZERO must not be used with L, X, or A columns (§7.3.2).
     const scalable = elementType !== "L" && elementType !== "X" && elementType !== "A";
-    let tscal = 1;
-    const tscalRaw = header.get(`TSCAL${n}`);
-    if (typeof tscalRaw === "number" || typeof tscalRaw === "bigint") {
-      if (scalable) {
-        tscal = Number(tscalRaw);
-        if (tscal === 0) {
-          warn(`TSCAL${n} is 0; every scaled value collapses to TZERO`);
-        }
-      } else if (Number(tscalRaw) !== 1) {
-        warn(`TSCAL${n} does not apply to a ${elementType} column; ignored`);
-      }
-    } else if (tscalRaw !== undefined) {
-      warn(`TSCAL${n} ${JSON.stringify(tscalRaw)} is not a number; ignored`);
-    }
-
-    let tzero = 0;
-    let tzeroBig: bigint | undefined;
-    const tzeroRaw = header.get(`TZERO${n}`);
-    if (typeof tzeroRaw === "number" || typeof tzeroRaw === "bigint") {
-      if (scalable) {
-        tzero = Number(tzeroRaw);
-        if (typeof tzeroRaw === "bigint") tzeroBig = tzeroRaw;
-      } else if (Number(tzeroRaw) !== 0) {
-        warn(`TZERO${n} does not apply to a ${elementType} column; ignored`);
-      }
-    } else if (tzeroRaw !== undefined) {
-      warn(`TZERO${n} ${JSON.stringify(tzeroRaw)} is not a number; ignored`);
-    }
+    const { tscal, tzero, tzeroBig } = readScaling(header, n, scalable, elementType, warn);
 
     // TNULL applies to integer stored values only (§7.3.2).
     let tnull: number | undefined;

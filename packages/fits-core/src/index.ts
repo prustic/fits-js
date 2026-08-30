@@ -17,7 +17,14 @@ export {
   type ImageRegion,
   type ReadImageOptions,
 } from "./image/image.js";
-export { type ColumnTypeCode, type ParsedTform, type TableColumn } from "./table/columns.js";
+export {
+  type AsciiTform,
+  type AsciiTypeCode,
+  type BinaryTform,
+  type ColumnTypeCode,
+  type ParsedTform,
+  type TableColumn,
+} from "./table/columns.js";
 export {
   readTable,
   type FitsTable,

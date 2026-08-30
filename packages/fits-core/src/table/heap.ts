@@ -91,13 +91,9 @@ export interface GatherPlan {
 
 /**
  * @internal Validate every descriptor against the heap and prefix-sum the
- * row lengths into Arrow-style slot boundaries. Pure, so the whole
- * descriptor contract is testable without building a file.
- *
- * `problem` is a fatal message naming the offending row; the standard
- * leaves negative counts and offsets undefined and requires arrays to lie
- * entirely within the heap, so those are refused rather than truncated the
- * way astropy truncates them.
+ * row lengths into Arrow slot boundaries. `problem` names the offending
+ * row: out-of-heap and negative descriptors are refused rather than
+ * truncated the way astropy truncates them.
  */
 export function planGather(
   counts: Float64Array,
