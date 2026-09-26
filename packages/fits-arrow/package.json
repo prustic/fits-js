@@ -1,0 +1,59 @@
+{
+  "name": "@fits-js/arrow",
+  "version": "0.0.0",
+  "description": "Apache Arrow adapter for FITS tables read with @fits-js/core",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/prustic/fits-js.git",
+    "directory": "packages/fits-arrow"
+  },
+  "homepage": "https://prustic.github.io/fits-js/",
+  "bugs": "https://github.com/prustic/fits-js/issues",
+  "keywords": [
+    "fits",
+    "astronomy",
+    "arrow",
+    "apache-arrow",
+    "duckdb"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.tsbuildinfo"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "dev": "tsc --build --watch",
+    "clean": "git clean -xdf .cache .turbo dist node_modules",
+    "test": "node --test dist/**/*.test.js && node --import ./scripts/arrow-17.mjs --test dist/**/*.test.js",
+    "test:coverage": "c8 --reporter=lcov --reporter=text --reports-dir=coverage --src=src --exclude='dist/**/*.test.js' node --test dist/**/*.test.js && node --import ./scripts/arrow-17.mjs --test dist/**/*.test.js",
+    "lint": "eslint"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "@fits-js/core": "workspace:^"
+  },
+  "peerDependencies": {
+    "apache-arrow": ">=17 <22"
+  },
+  "devDependencies": {
+    "@fits-js/eslint-config": "workspace:*",
+    "@fits-js/typescript-config": "workspace:*",
+    "@types/node": "catalog:",
+    "apache-arrow": "^21.2.0",
+    "apache-arrow-17": "npm:apache-arrow@17.0.0",
+    "eslint": "catalog:"
+  }
+}
