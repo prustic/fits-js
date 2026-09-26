@@ -4,6 +4,13 @@ import { readFileSync } from "node:fs";
 import { readHdus } from "../hdu/read-hdus.js";
 import { BytesReader, type RandomAccessReader } from "../io/reader.js";
 import { readTable } from "./table.js";
+import type { BinaryTform, ParsedTform } from "./columns.js";
+
+/** Narrow a column TFORM to its BINTABLE arm, asserting the discriminant. */
+function binary(tform: ParsedTform): BinaryTform {
+  assert.equal(tform.kind, "binary");
+  return tform;
+}
 
 // Real archive files. Expected values are NOT dumped from astropy: they are
 // decoded here independently from the committed bytes via DataView, a
@@ -52,7 +59,7 @@ test("real iue-mef BINTABLE column model matches the hand-read header", async ()
     t.columns.map((c) => [
       c.column.name,
       c.column.tform.code,
-      c.column.tform.repeat,
+      binary(c.column.tform).repeat,
       c.column.byteOffset,
     ]),
     [
@@ -151,10 +158,10 @@ test("real ROSAT RMF exposes its variable-length column model", async () => {
     ],
   );
 
-  const matrix = t.columns[5].column;
-  assert.equal(matrix.tform.elementCode, "E");
-  assert.equal(matrix.tform.maxCount, 34);
-  assert.equal(matrix.tform.repeat, 1, "an absent repeat count means 1");
+  const matrix = binary(t.columns[5].column.tform);
+  assert.equal(matrix.elementCode, "E");
+  assert.equal(matrix.maxCount, 34);
+  assert.equal(matrix.repeat, 1, "an absent repeat count means 1");
 });
 
 test("real ROSAT RMF heap decodes byte-for-byte (independent oracle)", async () => {
@@ -217,4 +224,136 @@ test("real ROSAT RMF projection fetches only the selected column's heap", async 
     withHeap.bytes() < RMF_STRIDE * RMF_ROWS,
     "a single-row range reads less than the whole table",
   );
+});
+
+// fos-mef HDU 1 (y19g0309t.c2h.tab): a real HST FOS ASCII table, dataOffset
+// 40320, NAXIS1=336, NAXIS2=2. Its 19 fields are positioned by TBCOL with
+// gaps between them, so the widths sum to 298, not 336.
+const FOS_DATA = 40320;
+const FOS_STRIDE = 336;
+
+// dss-poss2 HDU 1 (xp.mask): 4 F6.2 fields tiling a 24-character row over
+// 1600 rows, dataOffset 46080.
+const DSS_DATA = 46080;
+const DSS_STRIDE = 24;
+
+/** Field text at a row and 1-based TBCOL, decoded independently. */
+function fieldText(bytes: Uint8Array, at: number, tbcol: number, width: number): string {
+  return new TextDecoder("latin1").decode(bytes.subarray(at + tbcol - 1, at + tbcol - 1 + width));
+}
+
+test("real fos-mef ASCII table column model matches the hand-read header", async () => {
+  const { bytes } = fixture("fos-mef.fits");
+  const { hdus } = readHdus(bytes);
+  const t = await readTable(hdus[1], new BytesReader(bytes));
+
+  assert.equal(hdus[1].type, "table");
+  assert.equal(t.totalRows, 2);
+  assert.deepEqual(t.warnings, [], "gaps between fields are conforming");
+  assert.deepEqual(
+    t.columns.map((c) => [c.column.name, c.column.tform.code, c.column.byteOffset]),
+    [
+      ["CRVAL1", "D", 0],
+      ["CRPIX1", "E", 28],
+      ["CD1_1", "E", 44],
+      ["DATAMIN", "E", 60],
+      ["DATAMAX", "E", 76],
+      ["RA_APER", "D", 92],
+      ["DEC_APER", "D", 120],
+      ["FILLCNT", "I", 148],
+      ["ERRCNT", "I", 160],
+      ["FPKTTIME", "D", 172],
+      ["LPKTTIME", "D", 200],
+      ["CTYPE1", "A", 228],
+      ["APER_POS", "A", 240],
+      ["PASS_DIR", "I", 252],
+      ["YPOS", "E", 264],
+      ["YTYPE", "A", 280],
+      ["EXPOSURE", "E", 288],
+      ["X_OFFSET", "E", 304],
+      ["Y_OFFSET", "E", 320],
+    ],
+  );
+
+  // The widths do not tile the row, which is legal and must not warn.
+  const spanned = t.columns.reduce((n, c) => n + c.column.byteWidth, 0);
+  assert.equal(spanned, 298);
+  assert.equal(hdus[1].header.getNumber("NAXIS1"), FOS_STRIDE);
+});
+
+test("real fos-mef values decode from the field text (independent oracle)", async () => {
+  const { bytes } = fixture("fos-mef.fits");
+  const { hdus } = readHdus(bytes);
+  const t = await readTable(hdus[1], new BytesReader(bytes));
+
+  for (const col of t.columns) {
+    const { byteOffset, byteWidth, tform } = col.column;
+    for (let row = 0; row < 2; row++) {
+      const text = fieldText(bytes, FOS_DATA + row * FOS_STRIDE, byteOffset + 1, byteWidth);
+      if (tform.code === "A") {
+        assert.equal(
+          (col.values as string[])[row],
+          text.replace(/ +$/, ""),
+          `${col.column.name} row ${row}`,
+        );
+        continue;
+      }
+
+      // Every numeric field here is written with an explicit point or is a
+      // plain integer, so Number() over the trimmed text is a fair oracle.
+      const want = Number(text.trim());
+      const got = col.values as Float64Array | Int32Array | BigInt64Array;
+      assert.equal(Number(got[row]), want, `${col.column.name} row ${row}`);
+    }
+  }
+});
+
+test("real fos-mef D fields keep digits float32 would lose", async () => {
+  const { bytes } = fixture("fos-mef.fits");
+  const { hdus } = readHdus(bytes);
+  const t = await readTable(hdus[1], new BytesReader(bytes));
+
+  const raAper = t.columns[5];
+  const text = fieldText(bytes, FOS_DATA, raAper.column.byteOffset + 1, raAper.column.byteWidth);
+  assert.equal((raAper.values as Float64Array)[0], Number(text.trim()));
+  assert.notEqual(
+    (raAper.values as Float64Array)[0],
+    Math.fround(Number(text.trim())),
+    "a float32 column would round this away",
+  );
+});
+
+test("real dss-poss2 F6.2 columns decode for every row (independent oracle)", async () => {
+  const { bytes } = fixture("dss-poss2.fits");
+  const { hdus } = readHdus(bytes);
+  const t = await readTable(hdus[1], new BytesReader(bytes));
+
+  assert.equal(hdus[1].name, "xp.mask");
+  assert.equal(t.totalRows, 1600);
+  assert.deepEqual(
+    t.columns.map((c) => [c.column.name, c.column.unit, c.column.byteOffset]),
+    [
+      ["XI", "DEGREES", 0],
+      ["ETA", "DEGREES", 6],
+      ["XI_CORR", "ARCSEC", 12],
+      ["ETA_CORR", "ARCSEC", 18],
+    ],
+  );
+
+  for (const col of t.columns) {
+    const values = col.values as Float64Array;
+    for (let row = 0; row < 1600; row++) {
+      const text = fieldText(bytes, DSS_DATA + row * DSS_STRIDE, col.column.byteOffset + 1, 6);
+      assert.equal(values[row], Number(text.trim()), `${col.column.name} row ${row}`);
+    }
+  }
+});
+
+test("real dss-poss2 whole-table read fetches exactly the data bytes", async () => {
+  const { bytes } = fixture("dss-poss2.fits");
+  const { hdus } = readHdus(bytes);
+  const counting = countingReader(bytes);
+
+  await readTable(hdus[1], counting.reader);
+  assert.equal(counting.bytes(), DSS_STRIDE * 1600);
 });
