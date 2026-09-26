@@ -358,7 +358,7 @@ export function decodeAsciiSlab(
       // hold a value int64 cannot; wrapping it silently is not an option.
       if (v < INT64_MIN || v > INT64_MAX) {
         setMask(state, out);
-        if (state.overflowRow === undefined) {
+        if (!isNull && state.overflowRow === undefined) {
           state.overflowRow = out;
           state.overflowText = readAsciiText(bytes, at, width).trim();
         }
@@ -414,6 +414,15 @@ export function asciiWarnings(state: AsciiState, label: string): string[] {
   }
 
   return out;
+}
+
+/** @internal A card's value as written: after the `=`, before any comment. */
+function cardValueText(header: FitsHeader, keyword: string): string {
+  const card = header.cards.find((c) => !c.commentary && c.keyword === keyword)!;
+  const body = card.raw.slice(9);
+  const slash = body.indexOf("/");
+
+  return (slash >= 0 ? body.slice(0, slash) : body).trim();
 }
 
 /** @internal The result of assembling an ASCII table's column model. */
@@ -492,8 +501,10 @@ export function readAsciiColumns(
     if (typeof tnullRaw === "string") {
       tnullText = tnullRaw;
     } else if (tnullRaw !== undefined) {
-      warn(`TNULL${n} ${JSON.stringify(tnullRaw)} is not a string; compared as text`);
-      tnullText = JSON.stringify(tnullRaw);
+      // The parsed value loses the writer's spelling (-99.0 becomes -99), and
+      // the field holds that spelling, so compare against the card as written.
+      tnullText = cardValueText(header, `TNULL${n}`);
+      warn(`TNULL${n} ${tnullText} is not a string; compared as text`);
     }
 
     if (header.getString(`TDIM${n}`) !== undefined) {

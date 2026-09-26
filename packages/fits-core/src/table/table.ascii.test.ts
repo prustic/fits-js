@@ -195,6 +195,39 @@ test("an all-blank TNULL marks blank fields undefined", async () => {
   assert.deepEqual([...(t.columns[0].mask as Uint8Array)], [0, 1]);
 });
 
+// A bare-number TNULL is non-conforming (§7.2.2 makes it a string), but its
+// text is what the writer meant, and the parsed value loses that spelling.
+test("a numeric TNULL matches the field as the header spells it", async () => {
+  const float = oneColumn("F8.1", ["   -99.0", "    12.5"], 8, ["TNULL1  =                -99.0"]);
+  const ft = await readTable(float.hdu, float.reader);
+  assert.deepEqual([...(ft.columns[0].mask as Uint8Array)], [1, 0]);
+  assert.match(ft.warnings[0], /TNULL1 -99\.0 is not a string/);
+
+  const exp = oneColumn("E10.3", [" 1.000E+05", "       2.0"], 10, [
+    "TNULL1  =            1.000E+05",
+  ]);
+  const et = await readTable(exp.hdu, exp.reader);
+  assert.deepEqual([...(et.columns[0].mask as Uint8Array)], [1, 0]);
+});
+
+test("a TNULL too large for a number is compared as text, not thrown on", async () => {
+  const { hdu, reader } = oneColumn("I20", ["99999999999999999999", "                  42"], 20, [
+    "TNULL1  = 99999999999999999999",
+  ]);
+  const t = await readTable(hdu, reader);
+  assert.deepEqual([...(t.columns[0].mask as Uint8Array)], [1, 0]);
+  assert.equal((t.columns[0].values as BigInt64Array)[1], 42n);
+});
+
+test("a declared null that overflows int64 is not also reported as overflow", async () => {
+  const { hdu, reader } = oneColumn("I20", ["99999999999999999999", "                  42"], 20, [
+    "TNULL1  = '99999999999999999999'",
+  ]);
+  const t = await readTable(hdu, reader);
+  assert.deepEqual([...(t.columns[0].mask as Uint8Array)], [1, 0]);
+  assert.deepEqual(t.warnings, []);
+});
+
 test("TSCAL and TZERO scale into float64, and raw bypasses them", async () => {
   const { hdu, reader } = oneColumn("I5", ["    4", "   -4"], 5, [
     card("TSCAL1", 0.5),
