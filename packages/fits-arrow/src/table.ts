@@ -1,13 +1,14 @@
 import type { FitsTable } from "@fits-js/core";
 import { RecordBatch, Schema, Struct, Table, makeData, type Data, type Field } from "apache-arrow";
-import { convertColumn } from "./convert.js";
+import { convertColumn, fieldNames } from "./convert.js";
 
 /** @internal Convert a decoded table into a single record batch. */
 export function toRecordBatch(table: FitsTable): RecordBatch {
   const fields: Field[] = [];
   const children: Data[] = [];
-  for (const column of table.columns) {
-    const converted = convertColumn(column, table.rowCount);
+  const names = fieldNames(table.columns.map((c) => c.column));
+  for (const [i, column] of table.columns.entries()) {
+    const converted = convertColumn(column, table.rowCount, names[i]);
     fields.push(converted.field);
     children.push(converted.data);
   }
@@ -42,8 +43,11 @@ export function toRecordBatch(table: FitsTable): RecordBatch {
  *   (re, im), since Arrow has no complex type.
  * - Variable-length `P`/`Q` columns map to `List<T>`.
  *
- * Each field carries `fits:TFORM` metadata, plus `fits:TUNIT`, `fits:TDISP`
- * and `fits:TDIM` when the header sets them. A field is nullable when its
+ * Fields are named after `TTYPEn`. Names are made unique ignoring case, as
+ * DuckDB requires: a repeated name takes a `_1`, `_2` suffix and a column
+ * without `TTYPEn` is named `col<n>` after its position. Each field carries
+ * `fits:TFORM` metadata, plus `fits:TTYPE`, `fits:TUNIT`, `fits:TDISP` and
+ * `fits:TDIM` when the header sets them. A field is nullable when its
  * definition allows undefined values (`L`, integers with `TNULLn`, and every
  * ASCII table column), independent of whether this table has any.
  *

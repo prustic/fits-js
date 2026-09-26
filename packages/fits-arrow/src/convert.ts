@@ -57,8 +57,46 @@ export function isNullable(column: TableColumn): boolean {
   return integer && (column.tnull !== undefined || column.tnullBig !== undefined);
 }
 
+/**
+ * @internal Arrow field names, unique ignoring case, since DuckDB compares
+ * identifiers that way and pyarrow cannot select a repeated name. Every
+ * `TTYPEn` keeps its name on first use; repeats and unnamed columns take
+ * DuckDB's `_1`, `_2` suffixes, skipping names already taken.
+ */
+export function fieldNames(columns: readonly TableColumn[]): string[] {
+  const taken = new Set<string>();
+  const names: (string | undefined)[] = columns.map((column) => {
+    const name = column.name;
+    if (name === undefined || taken.has(name.toUpperCase())) {
+      return undefined;
+    }
+
+    taken.add(name.toUpperCase());
+    return name;
+  });
+
+  return names.map((name, i) => {
+    if (name !== undefined) {
+      return name;
+    }
+
+    const base = columns[i].name ?? `col${columns[i].index + 1}`;
+    let unique = base;
+    for (let k = 1; taken.has(unique.toUpperCase()); k++) {
+      unique = `${base}_${k}`;
+    }
+    taken.add(unique.toUpperCase());
+
+    return unique;
+  });
+}
+
 function fieldMetadata(column: TableColumn): Map<string, string> {
-  const metadata = new Map([["fits:TFORM", column.tform.raw.trim()]]);
+  const metadata = new Map<string, string>();
+  if (column.name !== undefined) {
+    metadata.set("fits:TTYPE", column.name);
+  }
+  metadata.set("fits:TFORM", column.tform.raw.trim());
   if (column.unit !== undefined) {
     metadata.set("fits:TUNIT", column.unit);
   }
@@ -110,9 +148,12 @@ function validity(mask: Uint8Array | undefined): object {
  * complex list offsets are rebuilt. The mask lands on the innermost data,
  * the one built from `values`, since it has one entry per value.
  */
-export function convertColumn(columnData: TableColumnData, rowCount: number): ArrowColumn {
+export function convertColumn(
+  columnData: TableColumnData,
+  rowCount: number,
+  name: string,
+): ArrowColumn {
   const { column, values, mask, offsets } = columnData;
-  const name = column.name ?? `col${column.index + 1}`;
   const label = `column ${JSON.stringify(name)}`;
   const nullable = isNullable(column);
   const metadata = fieldMetadata(column);
