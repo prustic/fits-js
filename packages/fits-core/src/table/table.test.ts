@@ -751,6 +751,26 @@ test("a count past the declared emax warns but still decodes", async () => {
   assert.ok(t.warnings.some((w) => /more than the 1 declared by TFORM/.test(w)));
 });
 
+test("heap problems name the row counted from the start of the table", async () => {
+  const header = [card("NAXIS1", 8), card("NAXIS2", 2), card("TFIELDS", 1)];
+  const window = { rows: { start: 1, count: 1 } };
+
+  const refused = heapTable(
+    [...header, "TFORM1  = '1PJ'"],
+    rows(desc32(1, 0), desc32(-1, 0)),
+    be([1], 4),
+  );
+  await assert.rejects(readTable(refused.hdu, refused.reader, window), /row 1 has a negative/);
+
+  const overMax = heapTable(
+    [...header, "TFORM1  = '1PJ(1)'"],
+    rows(desc32(1, 0), desc32(2, 4)),
+    be([4, 5, 6], 4),
+  );
+  const t = await readTable(overMax.hdu, overMax.reader, window);
+  assert.ok(t.warnings.some((w) => /row 1 holds 2 elements/.test(w)));
+});
+
 test("a broken THEAP is fatal when selected and a warning when projected around", async () => {
   const { hdu, reader } = binTableHdu(
     [
