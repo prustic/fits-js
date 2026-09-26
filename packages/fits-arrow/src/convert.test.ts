@@ -168,13 +168,20 @@ test("TDIM, TUNIT and TDISP travel as field metadata", () => {
   assert.deepEqual(
     [...img.metadata],
     [
+      ["fits:TTYPE", "img"],
       ["fits:TFORM", "6E"],
       ["fits:TUNIT", "adu"],
       ["fits:TDISP", "F8.3"],
       ["fits:TDIM", "(3,2)"],
     ],
   );
-  assert.deepEqual([...plain.metadata], [["fits:TFORM", "1J"]]);
+  assert.deepEqual(
+    [...plain.metadata],
+    [
+      ["fits:TTYPE", "plain"],
+      ["fits:TFORM", "1J"],
+    ],
+  );
 });
 
 test("a logical column maps to nullable Bool with the mask as nulls", () => {
@@ -376,19 +383,40 @@ test("ASCII table columns are all nullable scalars", () => {
   assert.deepEqual(items(arrow.getChild("a")), ["ab", null]);
 });
 
-test("an unnamed column takes its TTYPE position and duplicate names are kept", () => {
+test("repeated names take DuckDB suffixes, compared ignoring case", () => {
   const arrow = toArrowTable(
     table(
       1,
-      { column: { ...column(undefined, bin("J")), index: 2 }, values: new Int32Array(1) },
       { column: column("dup", bin("J")), values: new Int32Array(1) },
+      { column: column("DUP", bin("J")), values: new Int32Array(1) },
+      { column: column("dup_1", bin("J")), values: new Int32Array(1) },
       { column: column("dup", bin("J")), values: new Int32Array(1) },
     ),
   );
+
+  // A real dup_1 keeps its name; the generated ones step around it.
   assert.deepEqual(
     arrow.schema.fields.map((f) => f.name),
-    ["col3", "dup", "dup"],
+    ["dup", "DUP_2", "dup_1", "dup_3"],
   );
+  assert.equal(arrow.schema.fields[1].metadata.get("fits:TTYPE"), "DUP");
+});
+
+test("an unnamed column is named after its position unless that name is taken", () => {
+  const arrow = toArrowTable(
+    table(
+      1,
+      { column: { ...column(undefined, bin("J")), index: 0 }, values: new Int32Array(1) },
+      { column: { ...column(undefined, bin("J")), index: 1 }, values: new Int32Array(1) },
+      { column: column("COL2", bin("J")), values: new Int32Array(1) },
+    ),
+  );
+
+  assert.deepEqual(
+    arrow.schema.fields.map((f) => f.name),
+    ["col1", "col2_1", "COL2"],
+  );
+  assert.equal(arrow.schema.fields[0].metadata.has("fits:TTYPE"), false);
 });
 
 test("an empty table keeps its schema", () => {

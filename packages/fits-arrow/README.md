@@ -15,7 +15,7 @@ Apache Arrow adapter for FITS tables read with [`@fits-js/core`](https://www.npm
 npm install @fits-js/core @fits-js/arrow apache-arrow
 ```
 
-`apache-arrow` is a peer dependency; versions 17 through 21 work. Requires Node 22 or later, or any browser `@fits-js/core` runs in.
+`@fits-js/core` and `apache-arrow` are peer dependencies, so the `Hdu` and reader you pass in come from the same core your app uses; `apache-arrow` versions 17 through 21 work. Requires Node 22 or later, or any browser `@fits-js/core` runs in.
 
 ## Quick example
 
@@ -67,7 +67,7 @@ const ipc = writer.toUint8Array(true);
 
 The type comes from the decoded array, so it always matches what `readTable` returned. Arrow has no complex type; the `fits:TFORM` metadata tells a complex pair apart from a two-element float array.
 
-Each field carries its `TFORMn` as `fits:TFORM` metadata, plus `fits:TUNIT`, `fits:TDISP` and `fits:TDIM` when the header sets them. A column without `TTYPEn` is named `col<n>` after its position. Duplicate names are kept, which Arrow allows but DuckDB does not; select columns by index to avoid them.
+Fields are named after `TTYPEn`, made unique ignoring case since DuckDB compares names that way: a repeated name takes a `_1`, `_2` suffix, and a column without `TTYPEn` is named `col<n>` after its position. Each field carries `fits:TFORM` metadata, plus `fits:TTYPE`, `fits:TUNIT`, `fits:TDISP` and `fits:TDIM` when the header sets them, so a renamed column still has its header name.
 
 ## Nulls
 
