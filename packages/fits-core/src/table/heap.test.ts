@@ -110,6 +110,7 @@ test("planGather ignores the offset of a zero-length array", () => {
 
 test("planGather refuses descriptors the heap cannot contain", () => {
   assert.match(planGather(f64(-1), f64(0), "J", 32).problem!, /row 0 has a negative/);
+  assert.match(planGather(f64(-1), f64(0), "J", 32, undefined, 40).problem!, /row 40 has/);
   assert.match(
     planGather(f64(1), f64(-8), "J", 32).problem!,
     /negative or non-integer heap offset/,

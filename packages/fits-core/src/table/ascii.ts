@@ -395,17 +395,20 @@ function flagBad(
   state.badText = readAsciiText(bytes, at, width);
 }
 
-/** @internal Warnings the decode pass accumulated for one column. */
-export function asciiWarnings(state: AsciiState, label: string): string[] {
+/**
+ * @internal Warnings the decode pass accumulated for one column. Rows are
+ * numbered from `rowStart`, the first row of the read.
+ */
+export function asciiWarnings(state: AsciiState, label: string, rowStart: number): string[] {
   const out: string[] = [];
   if (state.badRow !== undefined) {
     out.push(
-      `${label}: row ${state.badRow} does not match TFORM ${state.column.tform.raw.trim()} (${JSON.stringify(state.badText)}); decoded as undefined`,
+      `${label}: row ${rowStart + state.badRow} does not match TFORM ${state.column.tform.raw.trim()} (${JSON.stringify(state.badText)}); decoded as undefined`,
     );
   }
   if (state.overflowRow !== undefined) {
     out.push(
-      `${label}: row ${state.overflowRow} holds ${state.overflowText}, which does not fit a 64-bit integer; decoded as undefined`,
+      `${label}: row ${rowStart + state.overflowRow} holds ${state.overflowText}, which does not fit a 64-bit integer; decoded as undefined`,
     );
   }
   if (state.badCharByte !== undefined) {

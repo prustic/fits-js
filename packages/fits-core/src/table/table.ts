@@ -537,6 +537,7 @@ async function gatherHeap(
   fail: (msg: string) => never,
   label: (column: TableColumn) => string,
   warnings: string[],
+  rowStart: number,
 ): Promise<void> {
   // One reference per non-empty row, flattened across the selected columns.
   const refStates: VarlenState[] = [];
@@ -551,6 +552,7 @@ async function gatherHeap(
       state.elementCode,
       geometry.length,
       state.column.tform.maxCount,
+      rowStart,
     );
     if (problem !== undefined) {
       fail(`${label(state.column)}: ${problem}`);
@@ -564,7 +566,7 @@ async function gatherHeap(
     if (plan!.overMaxRow !== undefined) {
       const row = plan!.overMaxRow;
       warnings.push(
-        `${label(state.column)}: row ${row} holds ${state.counts[row]} elements, more than the ${state.column.tform.maxCount} declared by TFORM; decoded anyway`,
+        `${label(state.column)}: row ${rowStart + row} holds ${state.counts[row]} elements, more than the ${state.column.tform.maxCount} declared by TFORM; decoded anyway`,
       );
     }
 
@@ -847,12 +849,12 @@ export async function readTable(
   }
 
   if (varlen.length > 0) {
-    await gatherHeap(varlen, heap.geometry, reader, opts, fail, label, warnings);
+    await gatherHeap(varlen, heap.geometry, reader, opts, fail, label, warnings, rowStart);
   }
 
   const columns: TableColumnData[] = states.map((state) => {
     if (state.kind === "ascii") {
-      warnings.push(...asciiWarnings(state, label(state.column)));
+      warnings.push(...asciiWarnings(state, label(state.column), rowStart));
     }
     if (state.badLogicalByte !== undefined) {
       const seen = `0x${state.badLogicalByte.toString(16).padStart(2, "0")}`;

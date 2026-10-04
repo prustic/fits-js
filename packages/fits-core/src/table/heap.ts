@@ -85,15 +85,15 @@ export interface GatherPlan {
   readonly offsets: Int32Array;
   /** Total slots, equal to the last offset. */
   readonly total: number;
-  /** First row whose count exceeded the declared `(emax)`, if any. */
+  /** First row, relative to `counts`, whose count exceeded the declared `(emax)`. */
   readonly overMaxRow?: number;
 }
 
 /**
  * @internal Validate every descriptor against the heap and prefix-sum the
  * row lengths into Arrow slot boundaries. `problem` names the offending
- * row: out-of-heap and negative descriptors are refused rather than
- * truncated the way astropy truncates them.
+ * row, numbered from `rowStart`: out-of-heap and negative descriptors are
+ * refused rather than truncated the way astropy truncates them.
  */
 export function planGather(
   counts: Float64Array,
@@ -101,6 +101,7 @@ export function planGather(
   elementCode: Exclude<ColumnTypeCode, "P" | "Q">,
   heapLength: number,
   maxCount?: number,
+  rowStart = 0,
 ): { plan?: GatherPlan; problem?: string } {
   const rowCount = counts.length;
   const offsets = new Int32Array(rowCount + 1);
@@ -111,19 +112,23 @@ export function planGather(
   for (let row = 0; row < rowCount; row++) {
     const count = counts[row];
     if (!Number.isInteger(count) || count < 0) {
-      return { problem: `row ${row} has a negative or non-integer array length (${count})` };
+      return {
+        problem: `row ${rowStart + row} has a negative or non-integer array length (${count})`,
+      };
     }
 
     if (count > 0) {
       const at = heapOffsets[row];
       if (!Number.isInteger(at) || at < 0) {
-        return { problem: `row ${row} has a negative or non-integer heap offset (${at})` };
+        return {
+          problem: `row ${rowStart + row} has a negative or non-integer heap offset (${at})`,
+        };
       }
 
       const bytes = heapArrayBytes(elementCode, count);
       if (at + bytes > heapLength) {
         return {
-          problem: `row ${row} spans heap bytes ${at}..${at + bytes} but the heap is ${heapLength} bytes`,
+          problem: `row ${rowStart + row} spans heap bytes ${at}..${at + bytes} but the heap is ${heapLength} bytes`,
         };
       }
       if (maxCount !== undefined && count > maxCount && overMaxRow === undefined) {

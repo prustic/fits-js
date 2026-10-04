@@ -154,6 +154,16 @@ test("an integer too large for int64 is masked, not wrapped", async () => {
   assert.match(t.warnings[0], /does not fit a 64-bit integer/);
 });
 
+test("warning rows count from the start of the table, not the read", async () => {
+  const bad = oneColumn("F6.2", ["  1.00", "  2.00", "abcdef"], 6);
+  const t = await readTable(bad.hdu, bad.reader, { rows: { start: 1, count: 2 } });
+  assert.match(t.warnings[0], /row 2 does not match TFORM F6.2/);
+
+  const wide = oneColumn("I20", ["                  42", "99999999999999999999"], 20);
+  const w = await readTable(wide.hdu, wide.reader, { rows: { start: 1, count: 1 } });
+  assert.match(w.warnings[0], /row 1 holds 99999999999999999999/);
+});
+
 test("a malformed integer masks and holds zero", async () => {
   const { hdu, reader } = oneColumn("I5", ["   12", "1 2  "], 5);
   const t = await readTable(hdu, reader);
