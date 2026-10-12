@@ -480,9 +480,10 @@ test("input that does not match readTable's shape is refused", () => {
   ];
 
   for (const [message, columnData, rowCount] of cases) {
-    assert.throws(() => toArrowTable(table(rowCount, columnData)), {
-      name: "TypeError",
-      message: new RegExp(message.replace(/[()]/g, "\\$&")),
-    });
+    assert.throws(
+      () => toArrowTable(table(rowCount, columnData)),
+      (e) => e instanceof TypeError && e.message.includes(message),
+      message,
+    );
   }
 });
