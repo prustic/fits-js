@@ -71,9 +71,11 @@ Fields are named after `TTYPEn`, made unique ignoring case since DuckDB compares
 
 ## Nulls
 
-A field is nullable when its definition allows undefined values: `L` columns, integer columns with `TNULLn`, and every ASCII table column. Floats are never nullable, since NaN is their undefined value. The decision depends on the header only, so every batch of a table has the same schema.
+A field is nullable when its definition allows undefined values: `L` columns, integer columns with `TNULLn`, float and complex columns, and every ASCII table column. The decision depends on the header only, so every batch of a table has the same schema.
 
-Nulls sit on the values they cover. For an array column the list itself is never null, its elements are; a variable-length row with no elements is an empty list, not a null one.
+Float NaN becomes null, since the FITS standard defines NaN as the undefined value of a float column, and a complex value is null when either part is NaN. So `IS NULL`, `count` and `avg` in SQL skip missing values as they should. The NaN stays in the buffer `readTable` returned, under the null bit.
+
+Nulls sit on the values they cover. For an array column the list itself is never null, its elements are (for complex columns, the (re, im) pair); a variable-length row with no elements is an empty list, not a null one.
 
 ## Memory
 

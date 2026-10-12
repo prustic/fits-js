@@ -6,7 +6,7 @@ import * as arrow17 from "apache-arrow-17";
 import { toArrowTable } from "./table.js";
 
 /** Walk nested vectors: `at(v, 1, 2)` is `v.get(1).get(2)`. */
-function at(vector: Vector | null, ...path: number[]): unknown {
+function at(vector: unknown, ...path: number[]): unknown {
   let node: unknown = vector;
   for (const i of path) {
     node = (node as Vector).get(i);
@@ -42,7 +42,7 @@ function everyType(): FitsTable {
     },
     { column: column(2, "u", "1J"), values: Uint32Array.of(0, 4294967295) },
     { column: column(3, "k", "1K"), values: BigInt64Array.of(-(2n ** 63n), 3n) },
-    { column: column(4, "e", "2E", { unit: "Jy" }), values: Float32Array.of(1, 2, 3, 4) },
+    { column: column(4, "e", "2E", { unit: "Jy" }), values: Float32Array.of(1, NaN, 3, 4) },
     { column: column(5, "z", "0D"), values: new Float64Array(0) },
     {
       column: column(6, "l", "1L"),
@@ -51,7 +51,7 @@ function everyType(): FitsTable {
     },
     { column: column(7, "x", "11X"), values: Uint8Array.from({ length: 22 }, (_, i) => i & 1) },
     { column: column(8, "a", "8A"), values: ["NGC 224", "café"] },
-    { column: column(9, "c", "2C"), values: Float32Array.of(1, 2, 3, 4, 5, 6, 7, 8) },
+    { column: column(9, "c", "2C"), values: Float32Array.of(1, 2, 3, NaN, 5, 6, 7, 8) },
     {
       column: column(10, "pj", "1PJ"),
       values: Int32Array.of(7, 8, 9),
@@ -107,6 +107,8 @@ test("IPC bytes cross between apache-arrow 17 and the installed version", () => 
   const in17 = arrow17.tableFromIPC(tableToIPC(original, "stream"));
   assert.deepEqual(describe(in17), describe(original));
   assert.equal(rows(in17), rows(original));
+  assert.deepEqual(items(at(in17.getChild("e"), 0)), [1, null], "a float null survives 17");
+  assert.equal(at(in17.getChild("c"), 0, 1), null, "so does a complex one");
 
   const back = tableFromIPC(arrow17.tableToIPC(in17, "stream"));
   assert.deepEqual(describe(back), describe(original));

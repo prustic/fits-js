@@ -19,10 +19,11 @@ import {
   type Data,
   type DataType,
 } from "apache-arrow";
-import { packBits, validityBitmap } from "./bits.js";
+import { floatValidity, packBits, validityBitmap } from "./bits.js";
 import { encodeUtf8 } from "./utf8.js";
 
-type NumericArray = Exclude<TableColumnData["values"], string[]>;
+type ColumnArray = TableColumnData["values"];
+type NumericArray = Exclude<ColumnArray, string[]>;
 
 // makeData is overloaded per concrete type; the column type is only known at
 // runtime, so the props are built loosely and checked by the caller.
@@ -41,7 +42,8 @@ function elementCode(column: TableColumn): string {
 
 /**
  * @internal Whether core can mask this column. Decided from the column
- * definition alone, so every batch of a table gets the same schema.
+ * definition alone, so every batch of a table gets the same schema. Float
+ * columns are nullable too, through NaN; see {@link validity}.
  */
 export function isNullable(column: TableColumn): boolean {
   if (column.tform.kind === "ascii") {
@@ -133,20 +135,31 @@ function numericType(values: NumericArray, label: string): DataType {
   return leaf();
 }
 
-function validity(mask: Uint8Array | undefined): object {
-  if (mask === undefined) {
-    return { nullCount: 0 };
-  }
+function isFloat(values: ColumnArray): values is Float32Array | Float64Array {
+  return values instanceof Float32Array || values instanceof Float64Array;
+}
 
-  const { bitmap, nullCount } = validityBitmap(mask);
-  return { nullBitmap: bitmap, nullCount };
+/**
+ * Null bitmap props for data built over `values`, `width` values per
+ * element. Float NaN is null as well as anything `mask` marks.
+ */
+function validity(values: ColumnArray, mask: Uint8Array | undefined, width: 1 | 2 = 1): object {
+  const nulls = isFloat(values)
+    ? floatValidity(values, width, mask)
+    : mask !== undefined
+      ? validityBitmap(mask)
+      : undefined;
+
+  return nulls === undefined
+    ? { nullCount: 0 }
+    : { nullBitmap: nulls.bitmap, nullCount: nulls.nullCount };
 }
 
 /**
  * @internal Convert one decoded column to an Arrow field and its data.
  * Typed arrays are passed through without copying; only bits, strings and
- * complex list offsets are rebuilt. The mask lands on the innermost data,
- * the one built from `values`, since it has one entry per value.
+ * complex list offsets are rebuilt. Nulls land on the innermost data built
+ * from `values`, or on the (re, im) pair for complex columns.
  */
 export function convertColumn(
   columnData: TableColumnData,
@@ -155,7 +168,7 @@ export function convertColumn(
 ): ArrowColumn {
   const { column, values, mask, offsets } = columnData;
   const label = `column ${JSON.stringify(name)}`;
-  const nullable = isNullable(column);
+  const nullable = isNullable(column) || isFloat(values);
   const metadata = fieldMetadata(column);
 
   if (mask !== undefined) {
@@ -178,7 +191,7 @@ export function convertColumn(
       length: rowCount,
       valueOffsets: utf8.offsets,
       data: utf8.bytes,
-      ...validity(mask),
+      ...validity(values, mask),
     });
 
     return { field: new Field(name, new Utf8(), nullable, metadata), data };
@@ -219,9 +232,9 @@ export function convertColumn(
     type,
     length: values.length,
     data: bool ? packBits(values as Uint8Array) : values,
-    ...validity(mask),
+    ...(complex ? { nullCount: 0 } : validity(values, mask)),
   });
-  let fieldNullable = nullable;
+  let fieldNullable = complex ? false : nullable;
 
   const wrap = (outer: DataType, props: object): void => {
     type = outer;
@@ -230,9 +243,12 @@ export function convertColumn(
   };
 
   if (complex) {
-    wrap(new FixedSizeList(2, new Field("item", type, fieldNullable)), {
+    // A pair is null when either part is NaN, so the pair carries the nulls.
+    wrap(new FixedSizeList(2, new Field("item", type, false)), {
       length: values.length / 2,
+      ...validity(values, mask, 2),
     });
+    fieldNullable = nullable;
   }
 
   if (varlen) {

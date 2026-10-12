@@ -154,7 +154,7 @@ test("columns projects by name and index, in selection order", async () => {
     columns: ["matrix", 0],
     batchRows: 400,
   });
-  assert.deepEqual(types(batches[0]), ["MATRIX:List<Float32>", "ENERG_LO:Float32"]);
+  assert.deepEqual(types(batches[0]), ["MATRIX:List<Float32>", "ENERG_LO:Float32?"]);
 });
 
 test("an empty range yields one batch that still carries the schema", async () => {

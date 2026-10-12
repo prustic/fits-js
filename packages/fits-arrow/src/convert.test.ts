@@ -123,14 +123,55 @@ test("a scaled column is typed by its Float64 values, not its TFORM", () => {
   assert.deepEqual(items(vector), [1.5, -2]);
 });
 
-test("float NaN stays a value and the field is not nullable", () => {
-  const arrow = toArrowTable(
-    table(2, { column: column("E", bin("E")), values: Float32Array.of(NaN, 1) }),
+test("float NaN is null, as FITS defines it, and stays in the shared buffer", () => {
+  const values = Float32Array.of(NaN, 1, -0);
+  const { data, vector } = only(table(3, { column: column("E", bin("E")), values }));
+
+  assert.equal(
+    toArrowTable(table(0, { column: column("E", bin("E")), values: new Float32Array(0) })).schema
+      .fields[0].nullable,
+    true,
+    "nullable whether or not this read has a NaN",
   );
-  const field = arrow.schema.fields[0];
-  assert.equal(field.nullable, false);
-  assert.equal(arrow.getChild("E")!.nullCount, 0);
-  assert.ok(Number.isNaN(arrow.getChild("E")!.get(0)));
+  assert.deepEqual(items(vector), [null, 1, -0]);
+  assert.equal(vector.nullCount, 1);
+  assert.ok(sameMemory(data.values, values));
+  assert.ok(Number.isNaN((data.values as Float32Array)[0]), "the NaN is not overwritten");
+});
+
+test("a float column without NaN gets no bitmap", () => {
+  const { data } = only(
+    table(2, { column: column("D", bin("D")), values: Float64Array.of(1, Infinity) }),
+  );
+  assert.equal(data.nullCount, 0);
+  assert.equal(data.nullBitmap?.length ?? 0, 0);
+});
+
+test("a scaled column is nullable through its Float64 values", () => {
+  const arrow = toArrowTable(
+    table(2, { column: column("s", bin("I"), { tscal: 0.1 }), values: Float64Array.of(0.5, NaN) }),
+  );
+  assert.equal(arrow.schema.fields[0].nullable, true);
+  assert.deepEqual(items(arrow.getChildAt(0)), [0.5, null]);
+});
+
+test("NaN in a float array or list nulls the element, not the row", () => {
+  const arrow = toArrowTable(
+    table(
+      2,
+      { column: column("fsl", bin("E", 2)), values: Float32Array.of(1, NaN, 3, 4) },
+      {
+        column: column("pe", bin("P", 1, "E")),
+        values: Float32Array.of(NaN, 2, 3),
+        offsets: Int32Array.of(0, 1, 3),
+      },
+    ),
+  );
+
+  assert.equal(arrow.getChild("fsl")!.nullCount, 0);
+  assert.deepEqual(items(at(arrow.getChild("fsl"), 0)), [1, null]);
+  assert.deepEqual(items(at(arrow.getChild("pe"), 0)), [null]);
+  assert.deepEqual(items(at(arrow.getChild("pe"), 1)), [2, 3]);
 });
 
 test("a repeat count maps to a fixed-size list over the same array", () => {
@@ -258,6 +299,30 @@ test("complex values map to (re, im) pairs over the interleaved array", () => {
   assert.equal(String(arrow.schema.fields[1].type), "FixedSizeList[3]<FixedSizeList[2]<Float64>>");
   assert.ok(sameMemory(mData.children[0].children[0].values, m));
   assert.deepEqual(items(at(arrow.getChild("m"), 1, 2)), [10, 11]);
+});
+
+test("a complex value is null when either part is NaN", () => {
+  const values = Float64Array.of(1, 2, NaN, 4, 5, NaN, 7, 8);
+  const arrow = toArrowTable(table(2, { column: column("m", bin("M", 2)), values }));
+  const pairs = arrow.batches[0].data.children[0].children[0];
+  const pairType = arrow.schema.fields[0].type as {
+    children: { nullable: boolean; type: { children: { nullable: boolean }[] } }[];
+  };
+
+  assert.equal(arrow.schema.fields[0].nullable, false, "rows are never null");
+  assert.equal(pairType.children[0].nullable, true, "the pair is");
+  assert.equal(pairType.children[0].type.children[0].nullable, false, "its parts are not");
+  assert.equal(pairs.nullCount, 2);
+  assert.equal(pairs.children[0].nullCount, 0);
+  assert.deepEqual(
+    items(at(arrow.getChild("m"), 0)).map((p) => (p === null ? null : items(p))),
+    [[1, 2], null],
+  );
+  assert.deepEqual(
+    items(at(arrow.getChild("m"), 1)).map((p) => (p === null ? null : items(p))),
+    [null, [7, 8]],
+  );
+  assert.ok(sameMemory(pairs.children[0].values, values));
 });
 
 test("TNULL marks a scalar integer column nullable and keeps the stored value", () => {
@@ -454,7 +519,7 @@ test("input that does not match readTable's shape is refused", () => {
     ],
     [
       "cannot hold nulls",
-      { column: column("e", bin("E")), values: new Float32Array(1), mask: Uint8Array.of(1) },
+      { column: column("j", bin("J")), values: new Int32Array(1), mask: Uint8Array.of(1) },
       1,
     ],
     [

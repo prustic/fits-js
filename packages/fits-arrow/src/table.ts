@@ -29,7 +29,7 @@ export function toRecordBatch(table: FitsTable): RecordBatch {
  * Numeric columns share memory with `table`: the Arrow buffers are views of
  * the same typed arrays, so writing to one changes the other. Logical and
  * bit columns are packed into bitmaps, strings are encoded as UTF-8, and
- * null masks become validity bitmaps; those are copies.
+ * nulls become validity bitmaps; those are copies.
  *
  * Column types:
  *
@@ -47,9 +47,13 @@ export function toRecordBatch(table: FitsTable): RecordBatch {
  * DuckDB requires: a repeated name takes a `_1`, `_2` suffix and a column
  * without `TTYPEn` is named `col<n>` after its position. Each field carries
  * `fits:TFORM` metadata, plus `fits:TTYPE`, `fits:TUNIT`, `fits:TDISP` and
- * `fits:TDIM` when the header sets them. A field is nullable when its
- * definition allows undefined values (`L`, integers with `TNULLn`, and every
- * ASCII table column), independent of whether this table has any.
+ * `fits:TDIM` when the header sets them.
+ *
+ * A field is nullable when its definition allows undefined values: `L`,
+ * integers with `TNULLn`, float and complex columns, and every ASCII table
+ * column, whether or not this table has any. Float NaN is null, as the FITS
+ * standard defines it, and a complex value is null when either part is
+ * NaN. The NaN itself stays in the shared buffer under the null bit.
  *
  * `table.warnings` is not carried over; read it from `table` directly.
  *
