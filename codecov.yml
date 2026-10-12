@@ -17,6 +17,10 @@ flags:
     paths:
       - packages/fits-core/
     carryforward: true
+  fits-arrow:
+    paths:
+      - packages/fits-arrow/
+    carryforward: true
 
 comment:
   layout: "reach,diff,flags,components"
